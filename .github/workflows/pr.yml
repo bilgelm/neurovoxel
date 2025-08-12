@@ -1,0 +1,23 @@
+name: pr
+on:
+  push:
+    branches: main
+  pull_request:
+    types: [opened, reopened, synchronize]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.13']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --all-extras --locked # abort if the lockfile changes
+      - run: uv run poe ci:format          # check formatting is correct
+      - run: uv run poe ci:lint            # python linting
+      - run: uv run poe typecheck          # typecheck
+      - run: uv run poe test               # run tests
+      - run: uv run poe mdlint             # markdown linting

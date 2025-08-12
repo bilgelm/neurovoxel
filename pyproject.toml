@@ -1,0 +1,74 @@
+[tool.poe.tasks]
+# run with eg `uv run poe format`
+format = "ruff format"
+lint = "ruff check --fix"
+typecheck = "pyright"
+test = "pytest"
+mdlint = "rumdl check . --fix"
+# run all the above
+all = [ {ref="format"}, {ref="lint"}, {ref="typecheck"}, {ref="test"}, {ref="mdlint"} ]
+
+# run with `uv run poe app`
+app = "streamlit run src/neurovoxel/app.py"
+
+"ci:format" = "ruff format --check"  # fail if not formatted
+"ci:lint" = "ruff check"
+
+[project]
+name = "NeuroVoxel"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+authors = [
+    { name = "Murat Bilgel", email = "bilgelm@users.noreply.github.com" }
+]
+
+requires-python = "~=3.13.0"
+dependencies = [
+    "click>=8.2.1",
+    "nanslice>=1.1",
+    "nilearn>=0.12.0",
+    "streamlit>=1.48.0",
+]
+
+[dependency-groups]
+dev = [
+    "poethepoet>=0.32.0",
+    "pyright>=1.1.403",
+    "pytest>=8.3.4",
+    "ruff>=0.12.0",
+    "rumdl>=0.0.114",
+]
+
+[tool.uv]
+package = true
+
+[project.scripts]
+neurovoxel = "neurovoxel.cli:main"
+neurovoxel-app = "neurovoxel.cli:run_app"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 80
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["neurovoxel"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+strict = ["**/*.py"]    # use 'strict' checking on all files
+pythonVersion = "3.13"  # specify the _lowest_ supported version
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules"

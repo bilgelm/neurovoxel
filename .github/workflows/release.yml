@@ -1,0 +1,15 @@
+name: release
+on:
+  release:
+    types: [published]
+jobs:
+  publish:
+    environment: release       # needed for PyPI OIDC
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
