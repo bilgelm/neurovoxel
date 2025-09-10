@@ -5,13 +5,18 @@ from pathlib import Path
 from bids.layout import BIDSLayout  # pyright: ignore[reportMissingTypeStubs]
 
 
-def load_bids(bids_root: Path, config_fname: Path | None = None) -> BIDSLayout:
+def load_bids(
+    bids_root: Path,
+    config_fname: Path | None = None,
+    database_path: Path | None = None,
+) -> BIDSLayout:
     """Load BIDS dataset."""
     layout = BIDSLayout(
         bids_root,
         validate=False,
         derivatives=False,
         config=["bids", "derivatives", config_fname] if config_fname else None,
+        database_path=database_path,
     )
 
     layout.add_derivatives(  # pyright: ignore[reportUnknownMemberType]
