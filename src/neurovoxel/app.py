@@ -3,11 +3,14 @@
 from copy import deepcopy
 from pathlib import Path
 
-import formulaic  # pyright: ignore[reportMissingTypeStubs]
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from bids.layout.models import (  # pyright: ignore[reportMissingTypeStubs]
     BIDSImageFile,
+)
+from formulaic import (  # pyright: ignore[reportMissingTypeStubs]
+    model_matrix,  # pyright: ignore[reportUnknownVariableType]
 )
 from formulaic.errors import (  # pyright: ignore[reportMissingTypeStubs]
     FormulaicError,
@@ -15,8 +18,12 @@ from formulaic.errors import (  # pyright: ignore[reportMissingTypeStubs]
     FormulaSyntaxError,
 )
 
-from neurovoxel.analysis import run_query
+from neurovoxel.analysis import get_masker, run_query
 from neurovoxel.io import load_bids
+from neurovoxel.viz import (
+    basic_interactive_viz,  # pyright: ignore[reportUnknownVariableType]
+    basic_viz,  # pyright: ignore[reportUnknownVariableType]
+)
 
 if __name__ == "__main__":
     st.title("NeuroVoxel")
@@ -162,6 +169,7 @@ if __name__ == "__main__":
             )
 
     # Use a text input for tabular data file
+    valid_table = False
     table_fname = st.text_input(
         "Enter tabular data path",
         value=st.session_state.get("table_fname", ""),
@@ -178,62 +186,90 @@ if __name__ == "__main__":
             st.write(
                 f"Selected tabular data file: {st.session_state.table_fname}"
             )
-            valid_table_fname = True
+            if table_fname_path.suffix in [".csv", ".tsv"]:
+                sep = "\t" if table_fname_path.suffix == ".tsv" else ","
+                # Read only the header first to check columns
+                header_df = pd.read_csv(table_fname_path, sep=sep, nrows=0)  # pyright: ignore[reportUnknownMemberType]
+                required_cols = {"subject", "session"}
+                if not required_cols.issubset(header_df.columns):
+                    st.error(
+                        "Tabular data file must contain "
+                        "'subject' and 'session' columns."
+                    )
+                else:
+                    dtype_dict = dict.fromkeys(required_cols, str)
+                    st.session_state.tbl = pd.read_csv(  # pyright: ignore[reportUnknownMemberType]
+                        table_fname_path,
+                        sep=sep,
+                        dtype=dtype_dict,  # pyright: ignore[reportArgumentType]
+                    )
+                    valid_table = True
         else:
             st.error(f"File does not exist: {st.session_state.table_fname}")
 
     # Show query input only if table can be loaded in
-    valid_table_fname = False
     valid_query = False
-    tbl = None
     lhs = None
-    if valid_table_fname:
-        table_fname_path = Path(st.session_state.table_fname)
-        if table_fname_path.suffix in [".csv", ".tsv"]:
-            sep = "\t" if table_fname_path.suffix == ".tsv" else ","
-            tbl = pd.read_csv(table_fname_path, sep=sep)  # pyright: ignore[reportUnknownMemberType]
-            st.session_state.tbl = tbl
+    query = st.text_input(
+        "Enter query",
+        value=st.session_state.get("query", ""),
+        key="query_input",
+        disabled=not valid_table,
+    )
+    if query:
+        st.session_state.query = query
 
-    if "tbl" in st.session_state:
-        query = st.text_input(
-            "Enter query",
-            value=st.session_state.get("query", ""),
-            key="query_input",
-        )
-        if query:
-            st.session_state.query = query
-
-            # check query
-            # currently we assume imaging is the outcome
-            # this check should be rewritten for a more general
-            # case that also allows imaging to be on the rhs
-            if "~" in query:
-                lhs, rhs = query.split("~")
-                lhs = lhs.strip()
-                rhs = rhs.strip()
-                if lhs not in st.session_state.entity_df["name"].values:  # noqa: PD011
-                    st.error("Imaging outcome in query is invalid")
-                try:
-                    X = formulaic.model_matrix(rhs, st.session_state.tbl)  # pyright: ignore[reportUnknownMemberType]
-                    valid_query = True
-                except FormulaSyntaxError:
-                    st.error("Invalid formula syntax")
-                except FormulaMaterializationError:
-                    st.error(
-                        "Issue with materializing the model matrix"
-                        "(missing variable or incompatible data)"
-                    )
-                except (
-                    FormulaicError,
-                    KeyError,
-                    TypeError,
-                    ValueError,
-                ) as e:
-                    st.error(f"Error while parsing formula: {e}")
-            else:
+        # check query
+        # currently we assume imaging is the outcome
+        # this check should be rewritten for a more general
+        # case that also allows imaging to be on the rhs
+        if "~" in query:
+            lhs, rhs = query.split("~")
+            lhs = lhs.strip()
+            rhs = rhs.strip()
+            if lhs not in st.session_state.entity_df["name"].values:  # noqa: PD011
+                st.error("Imaging outcome in query is invalid")
+            try:
+                x_mat = model_matrix(rhs, st.session_state.tbl)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                valid_query = True
+            except FormulaSyntaxError:
                 st.error("Invalid formula syntax")
+            except FormulaMaterializationError:
+                st.error(
+                    "Issue with materializing the model matrix"
+                    "(missing variable or incompatible data)"
+                )
+            except (
+                FormulaicError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as e:
+                st.error(f"Error while parsing formula: {e}")
+        else:
+            st.error("Invalid formula syntax")
+
+    bg_img = st.text_input(
+        "Enter file path to brain template image",
+        value=st.session_state.get("bg_img", ""),
+        key="bg_img_input",
+    )
+
+    if bg_img:
+        st.session_state.bg_img = bg_img
+
+    valid_bg_img = False
+    if st.session_state.get("bg_img"):
+        bg_img_path = Path(st.session_state.bg_img)
+        if bg_img_path.is_file():
+            st.write(
+                f"Selected brain template image: {st.session_state.bg_img}"
+            )
+            valid_bg_img = True
+        else:
+            st.error(f"File does not exist: {st.session_state.bg_img}")
     else:
-        st.error("Cannot read file: {st.session_state.table_fname}")
+        st.write("❗️ No brain template image selected.")
 
     mask = st.text_input(
         "Enter file path to binary mask specifying voxels to analyze",
@@ -241,32 +277,114 @@ if __name__ == "__main__":
         key="mask_input",
     )
 
-    # Update session state if the input changes
     if mask:
         st.session_state.mask = mask
 
-    run_btn = st.button("Run analysis", disabled=not valid_query)
+    valid_mask = False
+    if st.session_state.get("mask"):
+        mask_path = Path(st.session_state.mask)
+        if mask_path.is_file():
+            st.write(f"Selected brain mask: {st.session_state.mask}")
+            valid_mask = True
+        else:
+            st.error(f"File does not exist: {st.session_state.mask}")
+    else:
+        st.write("❗️ No brain mask selected.")
+
+    smoothing_fwhm = st.number_input(
+        "Smoothing FWHM (mm) for isotropic Gaussian",
+        min_value=0.0,
+        max_value=15.0,
+        value=5.0,
+        step=0.5,
+        key="smoothing_fwhm_input",
+    )
+
+    vox_size = st.number_input(
+        "Voxel size of statistical analysis space (mm, isotropic)",
+        min_value=1.0,
+        max_value=10.0,
+        value=4.0,
+        step=0.5,
+        key="vox_size",
+    )
+
+    n_perm = st.number_input(
+        "Number of permutations",
+        min_value=1,
+        max_value=100000,
+        value=1000,
+        step=1,
+        key="n_perm",
+    )
+
+    tfce = st.checkbox(
+        "Run TFCE",
+        value=False,
+        key="tfce",
+    )
+
+    run_btn = st.button(
+        "Run analysis",
+        disabled=not valid_query or not valid_bg_img or not valid_mask,
+    )
     if run_btn and valid_query and lhs:
         st.info("Running analysis...")
 
-        row = st.session_state.entity_df.loc[
-            st.session_state.entity_df["name"] == lhs
-        ]
-        image_paths: list[str] = st.session_state.layout.get(  # pyright: ignore[reportUnknownMemberType]
-            **row.to_dict(),  # pyright: ignore[reportCallIssue]
-            return_type="filename",
+        row = (
+            st.session_state.entity_df.loc[
+                st.session_state.entity_df["name"] == lhs
+            ]
+            .drop(columns=["name"])
+            .dropna(axis=1)  # pyright: ignore[reportUnknownMemberType]
+        )
+        images: list[BIDSImageFile] = st.session_state.layout.get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            **row.to_dict(orient="records")[0],  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
         )
 
+        st.info(f"Analysis will include up to {len(images)} {lhs} images")  # pyright: ignore[reportUnknownArgumentType]
+
         # call relevant function from neurovoxel
+        masker = get_masker(
+            st.session_state.mask,
+            smoothing_fwhm,
+            vox_size,
+            n_jobs=-1,
+        )
         st.session_state.result = run_query(
             st.session_state.query,
             st.session_state.tbl,
-            image_paths,
-            st.session_state.mask,
-            st.session_state.smoothing_fwhm,
-            st.session_state.vox_size,
-            st.session_state.n_perm,
-            st.session_state.n_jobs,
-            st.session_state.random_state,
-            st.session_state.tfce,
+            images,  # pyright: ignore[reportUnknownArgumentType]
+            masker,
+            n_perm,
+            n_jobs=-1,
+            random_state=42,
+            tfce=tfce,
         )
+
+        for idx, variable in enumerate(x_mat.columns):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+            fig = plt.figure()  # pyright: ignore[reportUnknownMemberType]
+            display = basic_viz(
+                st.session_state.result,
+                masker,
+                idx=idx,
+                stat="t",
+                figure=fig,  # pyright: ignore[reportArgumentType]
+                draw_cross=False,  # pyright: ignore[reportArgumentType]
+                bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
+                transparency=0.5,  # pyright: ignore[reportArgumentType]
+                title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+            )
+            st.pyplot(fig)
+
+            html_view = basic_interactive_viz(
+                st.session_state.result,
+                masker,
+                idx=idx,
+                stat="t",
+                bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
+                opacity=0.5,  # pyright: ignore[reportArgumentType]
+                title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+            )
+            html_content = html_view.get_iframe()  # pyright: ignore[reportUnknownMemberType]
+            st.components.v1.html(html_content, width=650, height=250)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
