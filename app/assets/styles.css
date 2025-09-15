@@ -1,0 +1,10 @@
+/* NeuroVoxel UI placeholder styles */
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f8f9fa;
+}
+.header {
+    color: #2a2a2a;
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}

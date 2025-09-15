@@ -1,32 +1,45 @@
-# --- Base Stage: Install Dependencies ---
-FROM python:3.13-slim-bookworm AS base
+# syntax=docker/dockerfile:1.7-labs
 
-ENV PYTHONUNBUFFERED=True
+##############################
+# Stage 1: Build dependencies
+##############################
+FROM python:3.13-slim-bookworm AS deps
+ENV PYTHONUNBUFFERED=1 UV_LINK_MODE=copy
 WORKDIR /app
 
-# Install uv
+# Install uv (static binaries)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Copy project definition files for caching
+# Only project metadata up front for better caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies using uv
-RUN uv sync --frozen
+# Cache uv downloads so rebuilds reuse wheels
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
 
-# --- Final Stage: Build Application Image ---
-FROM python:3.13-slim-bookworm AS runner
-
+##############################
+# Stage 2: Runtime
+##############################
+FROM python:3.13-slim-bookworm AS runtime
 WORKDIR /app
 
-# Copy the virtual environment from the base stage
-COPY --from=base /app/.venv ./.venv
+# (Optional) curl for healthcheck
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Copy application code
-COPY . /app
+# Bring the prebuilt virtual environment
+COPY --from=deps /app/.venv ./.venv
+
+# Copy your runtime code (avoid tests, etc. via .dockerignore)
+COPY src ./src
+COPY .streamlit ./.streamlit
+COPY pyproject.toml uv.lock README.md ./
+
+# Make venv tools first on PATH and expose src/ to imports
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 EXPOSE 8501
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
-
-# Set the entrypoint
-CMD ["/app/.venv/bin/streamlit", "run", "/app/src/neurovoxel/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Run Streamlit from the prebuilt venv
+CMD ["streamlit", "run", "src/neurovoxel/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
