@@ -217,4 +217,35 @@ To keep filenames short and clean, while preserving full details, embed the quer
   "git_commit": "abc123def456"
 }
 
+---
+
+## Acceptance criteria
+
+- [ ] Download button disabled until a run completes; then enables with options (Results zip, Config only, Report only).
+- [ ] Results zip contains all artifacts listed in this spec.
+- [ ] **Filename prefix** is the **dependent/LHS imaging variable** (sanitized). Optional pipeline override is supported.
+- [ ] **Map filenames use BEP041 entities**: `contrast-<label>`, `stat-<label>`, optional `space-<label>`, with `<mod>map` suffix.
+- [ ] `<mod>map` supports at least: `petmap`, `boldmap`, `anatmap`, `dwimap`, `ctmap`; extensible for future modalities.
+- [ ] `results_summary.csv` has **one row per contrast** and includes `imaging_variable` and `contrast_name`.
+- [ ] `manifest.json` uses a **`contrasts` array**; each contrast includes paired `statmaps.t` and `statmaps.p` paths and (optionally) peak stats.
+- [ ] `config.yaml` is sufficient to exactly rerun the analysis (includes query, parameters, versions, seed).
+- [ ] Filenames remain short at the outer (zip/folder) level.
+- [ ] No subject-level BLSA data is exported.
+
+---
+
+## Manual test plan
+
+1. Run an example query (*“What is the association of brain tau pathology with plasma p-tau181, adjusting for age?”*).
+2. Download results; unzip.
+3. Confirm presence of all required files.
+4. **Check map filenames** follow the pattern:
+   - `<imvar>[_space-<label>]_contrast-<label>_stat-<label>_<mod>map.nii.gz`
+   - Prefix equals the dependent/LHS (unless a pipeline override was set).
+5. Open the t-map in a viewer; dimensions match template/mask; affine is correct.
+6. `results_summary.csv` has **one row per contrast** and includes the `query`, `imaging_variable`, and `contrast_name`.
+7. `manifest.json` contains `contrasts[]`; for each contrast, `statmaps.t` and `statmaps.p` exist and correspond to the same `name`.
+8. `config.yaml` contains the verbatim query, input paths, parameters, and environment versions.
+9. Re-run with the same seed → confirm results reproduce (identical or within tolerance).
+
 
