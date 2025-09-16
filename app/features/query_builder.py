@@ -45,31 +45,45 @@ def query_builder(image_names: list[str]) -> dict[str, str | bool | float | int]
         key="query_string_input",
     )
 
-    # Advanced settings dropdown
+    # Prefill advanced settings from config.yaml if present
+    config_analysis = st.session_state.get("config_analysis", {})
+    config_source = st.session_state.get("config_source", "default")
     with st.expander("Advanced"):
+        smoothing_default = float(config_analysis.get("smoothing_fwhm", 5.0))
         smoothing = st.number_input(
             "Smoothing FWHM (mm) for isotropic Gaussian",
             min_value=0.0,
-            value=5.0,
+            value=smoothing_default,
             step=0.5,
             format="%.2f",
             key="smoothing_fwhm",
         )
+        if config_source == "uploaded" and "smoothing_fwhm" in config_analysis:
+            st.caption("Prepopulated from uploaded config.yaml")
+
+        voxel_size_default = float(config_analysis.get("voxel_size", 6.0))
         voxel_size = st.number_input(
             "Voxel size of statistical analysis space (mm, isotropic)",
             min_value=0.0,
-            value=6.0,
+            value=voxel_size_default,
             step=0.5,
             format="%.2f",
             key="voxel_size",
         )
+        if config_source == "uploaded" and "voxel_size" in config_analysis:
+            st.caption("Prepopulated from uploaded config.yaml")
+
+        permutations_default = int(config_analysis.get("permutations", 100))
         permutations = st.number_input(
             "Number of permutations",
             min_value=1,
-            value=100,
+            value=permutations_default,
             step=1,
             key="num_permutations",
         )
+        if config_source == "uploaded" and "permutations" in config_analysis:
+            st.caption("Prepopulated from uploaded config.yaml")
+
         run_tfce = st.checkbox("Run TFCE", key="run_tfce")
 
     # Run analysis button after advanced settings

@@ -258,6 +258,18 @@ def data_loader() -> tuple[str, bool, str | None, str | None]:
         st.error(f"Config file error: {config_error}")
         return "", False, None, None
 
+    # If config is valid, set config_analysis in session state for query_builder prefill
+    if config_data and "analysis" in config_data:
+        st.session_state["config_analysis"] = config_data["analysis"]
+        # Track config source for UI captions
+        if imported_new_config:
+            st.session_state["config_source"] = "uploaded"
+        else:
+            st.session_state["config_source"] = "default"
+    else:
+        st.session_state["config_analysis"] = {}
+        st.session_state["config_source"] = "default"
+
     # Only show success message if a new config was imported
     if imported_new_config:
         st.success("Config file loaded and validated!")
@@ -357,7 +369,8 @@ Returns (unchanged signature):
 Side effects:
     - st.session_state.layout: BIDSLayout (when loaded)
     - st.session_state.entity_df: DataFrame of image types (edited)
-    - st.session_state.paths: dict with keys bids_root, bids_config, template, mask, tabular
+    - st.session_state.paths: dict with keys bids_root,
+      bids_config, template, mask, tabular
 """
 
 def render_dataset_inputs(*, testing_mode: bool) -> tuple[bool, bool]:
@@ -457,7 +470,8 @@ def handle_testing_mode() -> tuple[str, bool, str | None, str | None]:
     """Handle UI and logic for testing mode.
 
     Returns:
-        tuple[str, bool, str | None, str | None]: Dataset path, run_clicked, use_blsa_str, bids_config_path.
+        tuple[str, bool, str | None, str | None]: Dataset path, run_clicked,
+        use_blsa_str, bids_config_path.
     """
     entity_df = _build_testing_entity_df()
     st.session_state.entity_df = _render_entity_table(entity_df)

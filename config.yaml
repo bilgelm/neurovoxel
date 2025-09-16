@@ -6,9 +6,9 @@ mask: /path/to/mask.nii.gz
 
 analysis:
   query: ""
-  smoothing_fwhm: 5.0
-  voxel_size: 6.0
-  permutations: 100
+  smoothing_fwhm: 2.0
+  voxel_size: 4.0
+  permutations: 200
   random_seed: 42
   multiple_comparisons: FDR
 
