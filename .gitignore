@@ -8,6 +8,8 @@ wheels/
 
 # VS code files
 .vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # Virtual environments
 .venv
