@@ -1,4 +1,3 @@
-# NeuroVoxel config.yaml - default template
 bids_root: /path/to/bids_root
 bids_config: /path/to/bids_config.json
 tabular: /path/to/tabular.csv
@@ -6,12 +5,7 @@ template: /path/to/template.nii.gz
 mask: /path/to/mask.nii.gz
 
 analysis:
-  dependent: outcome_var
-  independent: predictor_var
-  covariates:
-    - age
-    - sex
-    - icv
+  query: ""
   smoothing_fwhm: 5.0
   voxel_size: 6.0
   permutations: 100
@@ -19,19 +13,7 @@ analysis:
   multiple_comparisons: FDR
 
 environment:
-  app_version: 1.0.0
-  git_commit: abcdef123456
-  libraries:
-    streamlit: 1.30.0
-    pandas: 2.2.0
-    numpy: 1.26.0
-    bids: 0.15.2
-
-integrity:
-  bids_root_hash: ""
-  tabular_hash: ""
-  template_hash: ""
-  mask_hash: ""
+  testing: true
 
 notes:
   no_raw_blsa_exported: true

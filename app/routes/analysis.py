@@ -1,6 +1,7 @@
 """Analysis page route for NeuroVoxel multipage UI."""
 
 import streamlit as st
+
 from app.features.data_loader import analysis_form
 
 

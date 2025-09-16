@@ -1,9 +1,15 @@
+"""Streamlit UI for building and submitting neuroimaging analysis queries.
+
+This module provides a query builder form with variable buttons, advanced
+settings, and analysis submission functionality.
+"""
+
 import streamlit as st
 
 
-def query_builder(image_names: list[str]) -> dict[str, str]:
-    """
-    Display a query builder form with variable buttons.
+def query_builder(image_names: list[str]) -> dict[str, str | bool | float | int]:
+    """Display a query builder form with variable buttons.
+
     Clicking a variable button appends it to the query field.
     """
     st.subheader("Query Builder")
@@ -79,7 +85,7 @@ def query_builder(image_names: list[str]) -> dict[str, str]:
         "Click variable buttons to add them to your query, or type manually. Then click 'Run analysis'."
     )
     return {
-        "query": query_string,
+        "query": query_string if query_string is not None else "",
         "run_clicked": run_clicked,
         "smoothing_fwhm": smoothing,
         "voxel_size": voxel_size,
