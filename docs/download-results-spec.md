@@ -12,27 +12,44 @@ No raw subject-level data is exported; only derived files.
 
 ### A. Results (machine-readable)
 
-- **Statistical map(s)** (NIfTI `.nii.gz`) named per **BIDS Statistical Model Derivatives (BEP041)** / **BIDS Derivatives**:
-  - Pattern (group-level contrast map):
+- **Statistical map(s)** (NIfTI `.nii.gz`) named per **BIDS Statistical Model Derivatives (BEP041)**:
+
+  #### Filename convention
+
+  - **Outer bundle (kept short):**
     ```
-    <source>[_space-<label>]_contrast-<label>_stat-<label>_<mod>map.nii.gz
+    neurovoxel_blsa_<indep>_<YYYYMMDDTHHMMSSZ>.zip
     ```
-    - `contrast-<label>`: short descriptive name for the contrast.
-    - `stat-<label>`: one of `t`, `z`, `p`, `F`, `effect`, `variance`, etc. (per BEP041).
-    - `space-<label>`: e.g., `MNI152NLin6Asym`, if applicable.
-    - `<mod>map`: modality-derived map suffix (e.g., `boldmap`, `petmap`, `anatomicalmap` as appropriate for the pipeline).
-  - Examples for our voxelwise regression contrast on PET/tau (group level):
+
+  - **Inner maps (group-level contrast):**
     ```
-    task-blsa_contrast-plasma_p_tau181_stat-t_space-MNI152NLin6Asym_petmap.nii.gz
-    task-blsa_contrast-plasma_p_tau181_stat-p_space-MNI152NLin6Asym_petmap.nii.gz
+    dataset-blsa[_space-<label>]_contrast-<label>_stat-<label>_<mod>map.nii.gz
     ```
-  - **Mask** (brain/model mask actually used), also with space when relevant:
+
+    - `contrast-<label>`: short contrast name (CamelCase or snake_case).  
+    - `stat-<label>`: one of `t`, `z`, `p`, `F`, `effect`, `variance`, etc. (per BEP041).  
+    - `space-<label>` (optional): e.g., `MNI152NLin6Asym`.  
+    - `<mod>map`: modality-aware suffix:  
+      - PET → `petmap`  
+      - fMRI → `boldmap`  
+      - structural MRI → `anatmap`  
+      - CT → `ctmap`
+
+  - **Examples (BLSA group-level):**
     ```
-    task-blsa_space-MNI152NLin6Asym_mask.nii.gz
+    dataset-blsa_contrast-plasma_p_tau181_stat-t_space-MNI152NLin6Asym_petmap.nii.gz
+    dataset-blsa_contrast-plasma_p_tau181_stat-p_space-MNI152NLin6Asym_petmap.nii.gz
     ```
-  - Notes
-    - If no specific “task” applies, use an appropriate `<source>` (e.g., `task-blsa` or `dataset-blsa`) consistently.
-    - Keep `contrast-` labels short (CamelCase recommended in BEP041 examples).
+
+  - **Mask** (brain/model mask actually used), with space if relevant:
+    ```
+    dataset-blsa_space-MNI152NLin6Asym_mask.nii.gz
+    ```
+
+  - **Notes**
+    - Use `dataset-blsa` for group-level derivatives from the BLSA dataset.  
+    - Keep `contrast-` labels short and consistent.  
+    - Follow BEP041 entity order: `[source][_space-<label>]contrast-<label>_stat-<label>_<mod>map.nii.gz`.
 
 - **Tabular summaries (CSV)**:
   - `summary_voxelwise.csv` — run metadata (permutations, thresholds, correction).
@@ -130,3 +147,34 @@ integrity:
 
 privacy:
   exports_subject_level_data: false
+  
+### C. Sidecar metadata
+
+To keep filenames short and clean, while preserving full details, embed the query and run metadata in **`manifest.json`** (and `config.yaml`).
+
+**`manifest.json`** — compact, machine-readable index:
+```json
+{
+  "name": "neurovoxel_blsa_p-tau181_20250912T143210Z",
+  "dataset": "BLSA",
+  "query": "What is the association of brain tau pathology with plasma p-tau181, adjusting for age?",
+  "contrast_name": "plasma_p_tau181",
+  "n_permutations": 1000,
+  "correction_method": "TFCE",
+  "alpha": 0.05,
+  "random_seed": 1729,
+  "paths": {
+    "t_map": "dataset-blsa_contrast-plasma_p_tau181_stat-t_space-MNI152NLin6Asym_petmap.nii.gz",
+    "p_map": "dataset-blsa_contrast-plasma_p_tau181_stat-p_space-MNI152NLin6Asym_petmap.nii.gz",
+    "mask":  "dataset-blsa_space-MNI152NLin6Asym_mask.nii.gz",
+    "clusters": "clusters.csv",
+    "summary_voxelwise": "summary_voxelwise.csv",
+    "results_summary": "results_summary.csv",
+    "config": "config.yaml",
+    "report": "report.pdf",
+    "version": "VERSION.txt"
+  },
+  "run_timestamp_iso8601": "2025-09-12T14:32:10Z",
+  "app_version": "0.1.0",
+  "git_commit": "abc123def456"
+}
