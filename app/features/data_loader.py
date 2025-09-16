@@ -4,7 +4,7 @@ from typing import Optional, Dict, Tuple, List
 
 import pandas as pd
 import streamlit as st
-from bids.layout.models import BIDSImageFile
+from bids.layout.models import BIDSImageFile # pyright: ignore[reportMissingTypeStubs]
 from neurovoxel.io import load_bids
 from app.features.query_builder import query_builder
 
@@ -154,6 +154,40 @@ def _autodetect_all(bids_root_str: str, prefill: bool = False) -> Dict[str, str]
 # ---------- Main UI entry ----------
 
 def data_loader() -> tuple[str, bool, str | None, str | None]:
+    # --- Config.yaml upload and validation ---
+    import yaml
+    st.markdown("### Import config.yaml for reproducibility")
+    uploaded_config = st.file_uploader("Upload config.yaml", type=["yaml", "yml"], key="config_yaml_upload")
+    config_data = None
+    config_error = None
+    if uploaded_config:
+        try:
+            config_data = yaml.safe_load(uploaded_config)
+            # Minimal schema validation
+            required_top = ["bids_root", "bids_config", "tabular", "template", "mask", "analysis", "environment", "integrity", "notes"]
+            missing = [k for k in required_top if k not in config_data]
+            if missing:
+                config_error = f"Missing required top-level keys: {', '.join(missing)}"
+            # Example: check analysis subkeys
+            elif not all(k in config_data["analysis"] for k in ["dependent", "independent", "covariates", "smoothing_fwhm", "voxel_size", "permutations", "random_seed", "multiple_comparisons"]):
+                config_error = "Missing required analysis keys."
+            # Example: check environment subkeys
+            elif not all(k in config_data["environment"] for k in ["app_version", "git_commit", "libraries"]):
+                config_error = "Missing required environment keys."
+            # Example: check integrity subkeys
+            elif not all(k in config_data["integrity"] for k in ["bids_root_hash", "tabular_hash", "template_hash", "mask_hash"]):
+                config_error = "Missing required integrity keys."
+            # Example: check notes subkeys
+            elif "no_raw_blsa_exported" not in config_data["notes"]:
+                config_error = "Missing required notes key: no_raw_blsa_exported."
+        except Exception as e:
+            config_error = f"YAML parsing error: {e}"
+    if uploaded_config:
+        if config_error:
+            st.error(f"Config file error: {config_error}")
+        else:
+            st.success("Config file loaded and validated!")
+            st.json(config_data)
     """
     Render analysis input form and return user input values.
 
