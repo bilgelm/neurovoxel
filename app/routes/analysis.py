@@ -3,8 +3,10 @@
 import streamlit as st
 from app.features.data_loader import analysis_form
 
+
 class AnalysisPage:
     """Page for running neuroimaging analysis."""
+
     @staticmethod
     def render() -> None:
         """Render the analysis form and handle user input."""
