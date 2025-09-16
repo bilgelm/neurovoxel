@@ -19,7 +19,7 @@ from formulaic.errors import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 from neurovoxel.analysis import get_masker, run_query
-from neurovoxel.io import load_bids
+from neurovoxel.io import load_bids, save_all_maps
 from neurovoxel.viz import (
     basic_interactive_viz,  # pyright: ignore[reportUnknownVariableType]
     basic_viz,  # pyright: ignore[reportUnknownVariableType]
@@ -324,9 +324,34 @@ if __name__ == "__main__":
         key="tfce",
     )
 
+    outputdir = st.text_input(
+        "Enter directory to save outputs to",
+        value=st.session_state.get("outputdir", ""),
+        key="outputdir_input",
+    )
+
+    if outputdir:
+        st.session_state.outputdir = outputdir
+
+    valid_outputdir = False
+    if st.session_state.get("outputdir"):
+        outputdir_path = Path(st.session_state.outputdir)
+        if outputdir_path.is_dir():
+            st.write(f"Output directory: {st.session_state.outputdir}")
+            valid_outputdir = True
+        else:
+            st.error(
+                f"Output directory does not exist: {st.session_state.outputdir}"
+            )
+    else:
+        st.write("❗️ Output directory is not specified.")
+
     run_btn = st.button(
         "Run analysis",
-        disabled=not valid_query or not valid_bg_img or not valid_mask,
+        disabled=not valid_query
+        or not valid_bg_img
+        or not valid_mask
+        or not valid_outputdir,
     )
     if run_btn and valid_query and lhs:
         st.info("Running analysis...")
@@ -360,6 +385,14 @@ if __name__ == "__main__":
             n_jobs=-1,
             random_state=42,
             tfce=tfce,
+        )
+
+        save_all_maps(
+            Path(st.session_state.outputdir),
+            st.session_state.result,
+            masker,
+            lhs,
+            x_mat.columns.to_numpy().tolist(),  # pyright: ignore[reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
         )
 
         for idx, variable in enumerate(x_mat.columns):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]

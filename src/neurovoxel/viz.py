@@ -5,10 +5,18 @@
 from typing import Any
 
 import numpy as np
+from nibabel.nifti1 import Nifti1Image
 from nilearn.maskers import MultiNiftiMasker
 from nilearn.plotting import plot_stat_map, view_img
 from nilearn.plotting.displays._slicers import OrthoSlicer
 from nilearn.plotting.html_stat_map import StatMapView
+
+
+def unmask(
+    masked_img: np.typing.NDArray[Any], masker: MultiNiftiMasker
+) -> Nifti1Image:
+    """Convert a rasterized masked image back to an image."""
+    return masker.inverse_transform(masked_img)
 
 
 def basic_viz(
@@ -20,7 +28,7 @@ def basic_viz(
 ) -> OrthoSlicer:
     """Simple visualization."""
     return plot_stat_map(
-        masker.inverse_transform(result[stat][idx, :]),
+        unmask(result[stat][idx, :], masker),
         **kwargs,
     )
 
@@ -34,6 +42,6 @@ def basic_interactive_viz(  # pyright: ignore[]
 ) -> StatMapView:
     """Simple interactive visualization."""
     return view_img(
-        masker.inverse_transform(result[stat][idx, :]),
+        unmask(result[stat][idx, :], masker),
         **kwargs,
     )
