@@ -506,6 +506,3 @@ def handle_bids_loading(
                 st.session_state.entity_df = _render_entity_table(entity_df)
                 image_names = entity_df["name"].drop_duplicates().tolist()
                 query_builder(image_names)
-
-
-    # ...existing code...
