@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+import nanslice as ns
 from bids.layout.models import (  # pyright: ignore[reportMissingTypeStubs]
     BIDSImageFile,
 )
@@ -23,6 +24,7 @@ from neurovoxel.io import load_bids, save_all_maps
 from neurovoxel.viz import (
     basic_interactive_viz,  # pyright: ignore[reportUnknownVariableType]
     basic_viz,  # pyright: ignore[reportUnknownVariableType]
+    nanslice_overlay,  # pyright: ignore[reportUnknownVariableType]
 )
 
 if __name__ == "__main__":
@@ -396,18 +398,29 @@ if __name__ == "__main__":
         )
 
         for idx, variable in enumerate(x_mat.columns):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
-            fig = plt.figure()  # pyright: ignore[reportUnknownMemberType]
-            display = basic_viz(
-                st.session_state.result,
-                masker,
+            # fig = plt.figure()  # pyright: ignore[reportUnknownMemberType]
+            # display = basic_viz(
+            #     st.session_state.result,
+            #     masker,
+            #     idx=idx,
+            #     stat="t",
+            #     figure=fig,  # pyright: ignore[reportArgumentType]
+            #     draw_cross=False,  # pyright: ignore[reportArgumentType]
+            #     bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
+            #     transparency=0.5,  # pyright: ignore[reportArgumentType]
+            #     title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+            # )
+            fig = nanslice_overlay(
+                result=st.session_state.result,
+                masker=masker,
                 idx=idx,
-                stat="t",
-                figure=fig,  # pyright: ignore[reportArgumentType]
-                draw_cross=False,  # pyright: ignore[reportArgumentType]
-                bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
-                transparency=0.5,  # pyright: ignore[reportArgumentType]
-                title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+                alpha_stat="t",
+                contour_stat="logp_max_t",   # <--- use this
+                alpha_lim=(-3, 3),
+                cmap="RdYlBu_r",
+                title=f"Predictor {idx}: Beta overlay with t-stat transparency + p<0.05 contours"
             )
+
             st.pyplot(fig)
 
             html_view = basic_interactive_viz(

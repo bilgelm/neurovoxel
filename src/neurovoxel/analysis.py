@@ -17,6 +17,7 @@ from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
 from nilearn.mass_univariate import (  # pyright: ignore[reportMissingTypeStubs]
     permuted_ols,  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 )
+from nilearn.glm import OLSModel
 
 MIN_N_OBS = 10  # minimum number of observations required for analysis
 
@@ -102,13 +103,28 @@ def run_query(  # noqa: PLR0913
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
 
-    return permuted_ols(  # pyright: ignore[reportUnknownVariableType, reportReturnType]
+     # ------------------------------
+    # Compute OLS beta coefficients
+    # ------------------------------
+    ols_model = OLSModel(x_mat)
+    ols_results = ols_model.fit(y_mat)
+    beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+    
+    # ------------------------------
+    # Run permutation-based inference
+    # ------------------------------
+    permuted_results = permuted_ols(
         tested_vars=x_mat,
-        target_vars=y_mat,  # pyright: ignore[reportUnknownArgumentType]
+        target_vars=y_mat,
         n_perm=n_perm,
         n_jobs=n_jobs,
         random_state=random_state,
         masker=masker,
         tfce=tfce,
-        output_type="dict",
+        output_type="dict"
     )
+    
+    # Attach OLS betas explicitly
+    permuted_results["beta_coef"] = beta_coef
+    
+    return permuted_results
