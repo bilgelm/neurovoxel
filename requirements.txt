@@ -1,8 +1,0 @@
--e .
-streamlit>=1.33
-streamlit-shadcn-ui>=0.1.18
-pandas
-numpy
-matplotlib
-plotly
-scikit-learn

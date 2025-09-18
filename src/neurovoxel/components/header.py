@@ -16,11 +16,11 @@ def render_header() -> None:
         ),
         unsafe_allow_html=True,
     )
-    st.image("app/assets/logo.png", width=500)
+    st.image("assets/logo.png", width=500)
     st.markdown(
         (
             "<div style='color:#AAA; font-size:1.1rem; margin-top:8px;'>"
-            "Modular Neuroimaging Analysis Platform"
+            "Statistical Analysis Platform for Neuroimaging Datasets"
             "</div>"
         ),
         unsafe_allow_html=True,

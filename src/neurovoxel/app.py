@@ -1,334 +1,184 @@
 """NeuroVoxel user application."""
 
-from copy import deepcopy
+# pyright: reportMissingTypeStubs=false
+
 from pathlib import Path
 
+import click
 import matplotlib.pyplot as plt
-import pandas as pd
 import streamlit as st
-from bids.layout.models import (  # pyright: ignore[reportMissingTypeStubs]
-    BIDSImageFile,
-)
-from formulaic import (  # pyright: ignore[reportMissingTypeStubs]
-    model_matrix,  # pyright: ignore[reportUnknownVariableType]
-)
-from formulaic.errors import (  # pyright: ignore[reportMissingTypeStubs]
-    FormulaicError,
-    FormulaMaterializationError,
-    FormulaSyntaxError,
-)
 
-from neurovoxel.analysis import get_masker, run_query
-from neurovoxel.io import load_bids
-from neurovoxel.viz import (
+from neurovoxel.components.data import render_entity_table
+from neurovoxel.components.footer import render_footer
+from neurovoxel.components.header import render_header
+from neurovoxel.components.text_input import (
+    render_bids_input,
+    render_table_input,
+    render_template_input,
+)
+from neurovoxel.utils.analysis import get_masker, run_query
+from neurovoxel.utils.load_parse import (
+    load_bids,
+    load_config,
+    parse_layout,
+    parse_query,
+)
+from neurovoxel.utils.viz import (
     basic_interactive_viz,  # pyright: ignore[reportUnknownVariableType]
     basic_viz,  # pyright: ignore[reportUnknownVariableType]
 )
 
-if __name__ == "__main__":
-    st.title("NeuroVoxel")
 
-    # Use a text input for the BIDS root directory path
-    bids_root = st.text_input(
-        "Enter BIDS root directory path",
-        value=st.session_state.get("bids_root", ""),
-        key="bids_root_input",
-    )
+@click.command()
+@click.option(
+    "--config-file",
+    type=click.Path(exists=True, readable=True, file_okay=True, dir_okay=False),
+    help="NeuroVoxel configuration file.",
+)
+@click.option("--autoload", is_flag=True, help="Autoload paths")
+@click.option("--test-mode", is_flag=True, help="Enable test mode")
+def main(
+    config_file: Path | None = None,
+    autoload: bool = False,
+    test_mode: bool = False,
+) -> None:
+    """Main entry point for the NeuroVoxel Streamlit app."""
+    st.set_page_config(page_title="NeuroVoxel", layout="wide")
+    print(f"autoload {autoload}")
 
-    # Update session state if the input changes
-    if bids_root:
-        st.session_state.bids_root = bids_root
+    render_header()
 
-    valid_bids_root = False
-    if st.session_state.get("bids_root"):
-        bids_root_path = Path(st.session_state.bids_root)
-        if bids_root_path.is_dir():
-            st.write(
-                f"Selected BIDS root directory: {st.session_state.bids_root}"
+    # Banner for testing environment
+    if test_mode:
+        st.warning("**Site is running in TESTING environment**", icon="⚠️")
+
+    st.session_state.setdefault("paths", {})
+    st.session_state.setdefault("analysis", {})
+    if config_file:
+        st.info(f"Using NeuroVoxel configuration file: {config_file}")
+        config = load_config(Path(config_file))
+        st.success(
+            "Configuration file loaded and validated! "
+            "Inputs will be pre-filled with values from the configuration file."
+        )
+        if "paths" in config:
+            st.session_state.paths.update(config["paths"])
+        if "analysis" in config:
+            st.session_state.analysis.update(config["analysis"])
+
+    col1, col2 = st.columns(2)
+    with col1:
+        valid_bids = render_bids_input(autoload)
+
+        # Button to load dataset, enabled only if BIDS root directory is valid
+        load_btn = (
+            True
+            if autoload and valid_bids
+            else st.button("Load BIDS dataset", disabled=not valid_bids)
+        )
+
+        if load_btn:
+            info_loading_bids_box = st.empty()
+            info_loading_bids_box.info("Loading BIDS dataset...")
+            layout = load_bids(
+                bids_root=Path(
+                    st.session_state.get("paths", {}).get("bids_root")
+                ),
+                config_fname=Path(
+                    st.session_state.get("paths", {}).get("bids_config")
+                ),
             )
-            valid_bids_root = True
-        else:
-            st.error(f"Directory does not exist: {st.session_state.bids_root}")
-    else:
-        st.write("❗️ No BIDS root directory selected.")
+            st.session_state.layout = layout
+            info_loading_bids_box.empty()
+            st.success("BIDS dataset loaded successfully!")
+            st.session_state.entity_df = parse_layout(layout)
 
-    # Use a text input for any custom BIDS config file
-    config_fname = st.text_input(
-        "Optional: Enter custom BIDS config file path",
-        value=st.session_state.get("config_fname", ""),
-        key="config_fname_input",
-    )
-
-    # Update session state if the input changes
-    if config_fname:
-        st.session_state.config_fname = config_fname
-
-    valid_config_fname = False
-    if st.session_state.get("config_fname"):
-        config_fname_path = Path(st.session_state.config_fname)
-        if config_fname_path.is_file():
-            st.write(
-                f"Selected BIDS config file: {st.session_state.config_fname}"
+        valid_table = render_table_input(autoload)
+    with col2:
+        valid_tpl = render_template_input(
+            "Brain template image", "template", autoload
+        )
+        valid_mask = render_template_input(
+            "Binary brain mask specifying voxels to analyze", "mask", autoload
+        )
+        with st.expander("Advanced"):
+            smoothing_fwhm = st.number_input(
+                "Smoothing FWHM (mm) for isotropic Gaussian",
+                min_value=0.0,
+                max_value=15.0,
+                value=st.session_state.get("analysis", {}).get(
+                    "smoothing_fwhm", 5.0
+                ),
+                step=0.5,
+                key="smoothing_fwhm_input",
             )
-            valid_config_fname = True
-        else:
-            st.error(f"File does not exist: {st.session_state.config_fname}")
-    else:
-        st.write(
-            "No custom BIDS config file selected. Will use default config."
-        )
+            if smoothing_fwhm:
+                st.session_state.analysis["smoothing_fwhm"] = smoothing_fwhm
 
-    # Button to load dataset, enabled only if BIDS root directory is valid
-    load_btn = st.button("Load Dataset", disabled=not valid_bids_root)
-    layout_loaded = False
-    if load_btn and valid_bids_root:
-        st.info("Loading dataset...")
-        layout = load_bids(
-            bids_root=Path(st.session_state.bids_root),
-            config_fname=Path(st.session_state.config_fname)
-            if st.session_state.config_fname and valid_config_fname
-            else None,
-        )
-        st.session_state.layout = layout
-        st.success("Dataset loaded successfully!")
-        # list available imaging outcomes
-        img_list: list[BIDSImageFile] = layout.get(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            extension="nii.gz"
-        ) + layout.get(extension="nii")  # pyright: ignore[reportUnknownMemberType]
-        img_type_list = {}
+            voxel_size = st.number_input(
+                "Voxel size of statistical analysis space (mm, isotropic)",
+                min_value=1.0,
+                max_value=10.0,
+                value=st.session_state.get("analysis", {}).get(
+                    "voxel_size", 4.0
+                ),
+                step=0.5,
+                key="voxel_size_input",
+            )
+            if voxel_size:
+                st.session_state.analysis["voxel_size"] = voxel_size
 
-        entity_df = pd.DataFrame()
-        for img in img_list:
-            entities = deepcopy(img.entities)
-            del entities["subject"]
-            del entities["session"]
-            entities_tuple = tuple(entities.items())
-            if entities_tuple in img_type_list:
-                img_type_list[entities_tuple] += 1
-            else:
-                entity_df = pd.concat(
-                    [entity_df, pd.DataFrame([entities])], ignore_index=True
-                )
-                img_type_list[entities_tuple] = 1
+            n_perm = st.number_input(
+                "Number of permutations",
+                min_value=0,
+                max_value=100000,
+                value=st.session_state.get("analysis", {}).get("n_perm", 1000),
+                step=1,
+                key="n_perm_input",
+            )
+            if n_perm:
+                st.session_state.analysis["n_perm"] = n_perm
 
-        entity_df = entity_df.drop(
-            ["SpatialReference", "extension", "tracer"], axis=1, errors="ignore"
-        )
-        entity_df = entity_df.sort_values(
-            by=["datatype", "suffix", "desc", "param", "trc"],
-        ).reset_index(drop=True)
+            tfce = st.checkbox(
+                "Run TFCE",
+                value=st.session_state.get("analysis", {}).get("tfce", False),
+                key="tfce_input",
+            )
 
-        def concat_name(row: pd.Series) -> str:
-            """Concatenate columns if they exist and are not null.
-
-            Return:
-            ------
-                Concatenated columns or 'Enter name here' if none are present.
-            """
-            parts = [
-                str(row[col])
-                for col in ["desc", "param", "trc", "meas", "suffix"]
-                if col in row and pd.notna(row[col])
-            ]
-            return "_".join(parts) if parts else "Enter name here"
-
-        entity_df["name"] = entity_df.apply(
-            concat_name,
-            axis=1,
-        )
-        st.session_state.entity_df = entity_df
+            if tfce:
+                st.session_state.analysis["tfce"] = tfce
 
     if "entity_df" in st.session_state:
-        st.write("Types of images in dataset:")
-        # Make only the 'name' column editable
-        disabled_cols = [
-            col for col in st.session_state.entity_df.columns if col != "name"
-        ]
-        columns = list(st.session_state.entity_df.columns)
-        # move the 'name' column to the beginning
-        columns.remove("name")
-        columns = ["name", *columns]
-
-        edited_entity_df = st.data_editor(
-            st.session_state.entity_df,
-            disabled=disabled_cols,
-            key="entity_table_editor",
-            use_container_width=True,
-            column_order=columns,
-            hide_index=True,
+        # Render editable table; save any user edits to session state
+        st.session_state.entity_df = render_entity_table(
+            st.session_state.entity_df
         )
-        # Save edits to session state
-        st.session_state.entity_df = edited_entity_df
 
-        # Check for duplicate names
-        name_col = edited_entity_df["name"]
-        if name_col.duplicated().any():
-            st.error(
-                "Entries in the 'name' column must be unique. "
-                "Please fix duplicates before continuing."
-            )
-
-    # Use a text input for tabular data file
-    valid_table = False
-    table_fname = st.text_input(
-        "Enter tabular data path",
-        value=st.session_state.get("table_fname", ""),
-        key="table_fname_input",
-    )
-
-    # Update session state if the input changes
-    if table_fname:
-        st.session_state.table_fname = table_fname
-
-    if st.session_state.get("table_fname"):
-        table_fname_path = Path(st.session_state.table_fname)
-        if table_fname_path.is_file():
-            st.write(
-                f"Selected tabular data file: {st.session_state.table_fname}"
-            )
-            if table_fname_path.suffix in [".csv", ".tsv"]:
-                sep = "\t" if table_fname_path.suffix == ".tsv" else ","
-                # Read only the header first to check columns
-                header_df = pd.read_csv(table_fname_path, sep=sep, nrows=0)  # pyright: ignore[reportUnknownMemberType]
-                required_cols = {"subject", "session"}
-                if not required_cols.issubset(header_df.columns):
-                    st.error(
-                        "Tabular data file must contain "
-                        "'subject' and 'session' columns."
-                    )
-                else:
-                    dtype_dict = dict.fromkeys(required_cols, str)
-                    st.session_state.tbl = pd.read_csv(  # pyright: ignore[reportUnknownMemberType]
-                        table_fname_path,
-                        sep=sep,
-                        dtype=dtype_dict,  # pyright: ignore[reportArgumentType]
-                    )
-                    valid_table = True
-        else:
-            st.error(f"File does not exist: {st.session_state.table_fname}")
-
-    # Show query input only if table can be loaded in
-    valid_query = False
-    lhs = None
     query = st.text_input(
         "Enter query",
-        value=st.session_state.get("query", ""),
+        value=st.session_state.get("analysis", {}).get("query"),
         key="query_input",
-        disabled=not valid_table,
     )
+
     if query:
-        st.session_state.query = query
+        st.session_state.analysis["query"] = query
 
-        # check query
-        # currently we assume imaging is the outcome
-        # this check should be rewritten for a more general
-        # case that also allows imaging to be on the rhs
-        if "~" in query:
-            lhs, rhs = query.split("~")
-            lhs = lhs.strip()
-            rhs = rhs.strip()
-            if lhs not in st.session_state.entity_df["name"].values:  # noqa: PD011
-                st.error("Imaging outcome in query is invalid")
-            try:
-                x_mat = model_matrix(rhs, st.session_state.tbl)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-                valid_query = True
-            except FormulaSyntaxError:
-                st.error("Invalid formula syntax")
-            except FormulaMaterializationError:
-                st.error(
-                    "Issue with materializing the model matrix"
-                    "(missing variable or incompatible data)"
-                )
-            except (
-                FormulaicError,
-                KeyError,
-                TypeError,
-                ValueError,
-            ) as e:
-                st.error(f"Error while parsing formula: {e}")
-        else:
-            st.error("Invalid formula syntax")
+    lhs = rhs = None
+    if query and "entity_df" in st.session_state:
+        lhs, rhs = parse_query(
+            query,
+            st.session_state.entity_df["name"].tolist(),
+            st.session_state.tbl,
+        )
 
-    bg_img = st.text_input(
-        "Enter file path to brain template image",
-        value=st.session_state.get("bg_img", ""),
-        key="bg_img_input",
-    )
-
-    if bg_img:
-        st.session_state.bg_img = bg_img
-
-    valid_bg_img = False
-    if st.session_state.get("bg_img"):
-        bg_img_path = Path(st.session_state.bg_img)
-        if bg_img_path.is_file():
-            st.write(
-                f"Selected brain template image: {st.session_state.bg_img}"
-            )
-            valid_bg_img = True
-        else:
-            st.error(f"File does not exist: {st.session_state.bg_img}")
-    else:
-        st.write("❗️ No brain template image selected.")
-
-    mask = st.text_input(
-        "Enter file path to binary mask specifying voxels to analyze",
-        value=st.session_state.get("mask", ""),
-        key="mask_input",
-    )
-
-    if mask:
-        st.session_state.mask = mask
-
-    valid_mask = False
-    if st.session_state.get("mask"):
-        mask_path = Path(st.session_state.mask)
-        if mask_path.is_file():
-            st.write(f"Selected brain mask: {st.session_state.mask}")
-            valid_mask = True
-        else:
-            st.error(f"File does not exist: {st.session_state.mask}")
-    else:
-        st.write("❗️ No brain mask selected.")
-
-    smoothing_fwhm = st.number_input(
-        "Smoothing FWHM (mm) for isotropic Gaussian",
-        min_value=0.0,
-        max_value=15.0,
-        value=5.0,
-        step=0.5,
-        key="smoothing_fwhm_input",
-    )
-
-    vox_size = st.number_input(
-        "Voxel size of statistical analysis space (mm, isotropic)",
-        min_value=1.0,
-        max_value=10.0,
-        value=4.0,
-        step=0.5,
-        key="vox_size",
-    )
-
-    n_perm = st.number_input(
-        "Number of permutations",
-        min_value=1,
-        max_value=100000,
-        value=1000,
-        step=1,
-        key="n_perm",
-    )
-
-    tfce = st.checkbox(
-        "Run TFCE",
-        value=False,
-        key="tfce",
-    )
+    print(f"lhs {lhs}")
+    print(f"rhs {rhs}")
 
     run_btn = st.button(
         "Run analysis",
-        disabled=not valid_query or not valid_bg_img or not valid_mask,
+        disabled=not (lhs and valid_mask),
     )
-    if run_btn and valid_query and lhs:
+    if run_btn:
         st.info("Running analysis...")
 
         row = (
@@ -338,40 +188,43 @@ if __name__ == "__main__":
             .drop(columns=["name"])
             .dropna(axis=1)  # pyright: ignore[reportUnknownMemberType]
         )
-        images: list[BIDSImageFile] = st.session_state.layout.get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        images = st.session_state.layout.get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
             **row.to_dict(orient="records")[0],  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
         )
 
-        st.info(f"Analysis will include up to {len(images)} {lhs} images")  # pyright: ignore[reportUnknownArgumentType]
+        st.info(f"Analysis will include up to {len(images)} {lhs} images")
 
         # call relevant function from neurovoxel
         masker = get_masker(
-            st.session_state.mask,
-            smoothing_fwhm,
-            vox_size,
-            n_jobs=-1,
+            st.session_state.get("path", {}).get("mask"),
+            st.session_state.get("analysis", {}).get("smoothing_fwhm"),
+            st.session_state.get("analysis", {}).get("voxel_size"),
+            n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
         )
+
         st.session_state.result = run_query(
-            st.session_state.query,
+            st.session_state.get("analysis", {}).get("query"),
             st.session_state.tbl,
             images,  # pyright: ignore[reportUnknownArgumentType]
             masker,
-            n_perm,
-            n_jobs=-1,
-            random_state=42,
+            n_perm=st.session_state.get("analysis", {}).get("n_perm"),
+            n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
+            random_state=st.session_state.get("analysis", {}).get(
+                "random_state", 42
+            ),
             tfce=tfce,
         )
 
-        for idx, variable in enumerate(x_mat.columns):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+        for idx, variable in enumerate(rhs):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
             fig = plt.figure()  # pyright: ignore[reportUnknownMemberType]
-            display = basic_viz(
+            basic_viz(
                 st.session_state.result,
                 masker,
                 idx=idx,
                 stat="t",
                 figure=fig,  # pyright: ignore[reportArgumentType]
                 draw_cross=False,  # pyright: ignore[reportArgumentType]
-                bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
+                bg_img=st.session_state.get("path", {}).get("template"),  # pyright: ignore[reportArgumentType]
                 transparency=0.5,  # pyright: ignore[reportArgumentType]
                 title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
             )
@@ -382,9 +235,15 @@ if __name__ == "__main__":
                 masker,
                 idx=idx,
                 stat="t",
-                bg_img=st.session_state.bg_img,  # pyright: ignore[reportArgumentType]
+                bg_img=st.session_state.get("path", {}).get("template"),  # pyright: ignore[reportArgumentType]
                 opacity=0.5,  # pyright: ignore[reportArgumentType]
                 title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
             )
             html_content = html_view.get_iframe()  # pyright: ignore[reportUnknownMemberType]
             st.components.v1.html(html_content, width=650, height=250)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+
+    render_footer()
+
+
+if __name__ == "__main__":
+    main()

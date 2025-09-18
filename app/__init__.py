@@ -1,1 +1,0 @@
-"""NeuroVoxel app package init."""

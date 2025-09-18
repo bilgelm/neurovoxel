@@ -1,21 +1,19 @@
 """Conduct statistical analysis."""
 
+# pyright: reportMissingTypeStubs=false
+
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from bids.layout.models import (  # pyright: ignore[reportMissingTypeStubs]
-    BIDSImageFile,
-)
-from formulaic import (  # pyright: ignore[reportMissingTypeStubs]
+from bids.layout.models import BIDSImageFile
+from formulaic import (
     model_matrix,  # pyright: ignore[reportUnknownVariableType]
 )
 from nibabel.nifti1 import Nifti1Image
-from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
-    MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
-)
-from nilearn.mass_univariate import (  # pyright: ignore[reportMissingTypeStubs]
-    permuted_ols,  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
+from nilearn.maskers import MultiNiftiMasker
+from nilearn.mass_univariate import (
+    permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
 
 MIN_N_OBS = 10  # minimum number of observations required for analysis
@@ -44,7 +42,7 @@ def run_query(  # noqa: PLR0913
     n_perm: int,
     n_jobs: int,
     random_state: int,
-    tfce: bool,  # noqa: FBT001
+    tfce: bool,
     handle_zero_voxels: Literal["keep", "exclude"] = "keep",
 ) -> dict[str, np.typing.NDArray[Any]]:
     """Run permuted OLS given a query, BIDS dataset, and tabular data file."""
