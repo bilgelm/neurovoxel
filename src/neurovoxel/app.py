@@ -196,7 +196,7 @@ def main(
 
         # call relevant function from neurovoxel
         masker = get_masker(
-            st.session_state.get("path", {}).get("mask"),
+            st.session_state.get("paths", {}).get("mask"),
             st.session_state.get("analysis", {}).get("smoothing_fwhm"),
             st.session_state.get("analysis", {}).get("voxel_size"),
             n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
@@ -224,7 +224,7 @@ def main(
                 stat="t",
                 figure=fig,  # pyright: ignore[reportArgumentType]
                 draw_cross=False,  # pyright: ignore[reportArgumentType]
-                bg_img=st.session_state.get("path", {}).get("template"),  # pyright: ignore[reportArgumentType]
+                bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
                 transparency=0.5,  # pyright: ignore[reportArgumentType]
                 title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
             )
@@ -235,7 +235,7 @@ def main(
                 masker,
                 idx=idx,
                 stat="t",
-                bg_img=st.session_state.get("path", {}).get("template"),  # pyright: ignore[reportArgumentType]
+                bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
                 opacity=0.5,  # pyright: ignore[reportArgumentType]
                 title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
             )
