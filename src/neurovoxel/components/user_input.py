@@ -178,3 +178,51 @@ def render_analysis_param_input() -> None:
         value=st.session_state.get("analysis", {}).get("tfce", False),
         key="tfce_input",
     )
+
+
+def render_outputdir_input(autoload: bool = False) -> bool:
+    """Get output directory path."""
+    outputdir_box = st.empty()
+    outputdir = outputdir_box.text_input(
+        "Output directory",
+        value=st.session_state.paths.get("outputdir"),
+        key="outputdir_input",
+    )
+
+    # Update session state if the input changes
+    if outputdir:
+        st.session_state.paths["outputdir"] = outputdir
+
+    valid_outputdir = False
+    if st.session_state.get("paths", {}).get("outputdir"):
+        outputdir_path = Path(
+            st.session_state.get("paths", {}).get("outputdir")
+        )
+        if outputdir_path.exists():
+            if is_directory_empty(outputdir_path):
+                valid_outputdir = True
+            else:
+                st.error("Please specify an empty directory for output.")
+        else:
+            try:
+                outputdir_path.mkdir(parents=True, exist_ok=False)
+                valid_outputdir = True
+            except OSError as e:
+                st.error(f"Could not create output directory: {e}")
+    else:
+        st.write("❗️ No output directory selected.")
+
+    if autoload and valid_outputdir:
+        outputdir_box.empty()
+
+    return valid_outputdir
+
+
+def is_directory_empty(directory_path: Path) -> bool:
+    """Check if a directory is empty."""
+    if not directory_path.is_dir():
+        # Handle cases where the path is not a directory or doesn't exist
+        msg = f"Path '{directory_path}' is not a directory or does not exist."
+        raise ValueError(msg)
+
+    return not any(directory_path.iterdir())

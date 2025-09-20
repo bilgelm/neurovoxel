@@ -14,6 +14,7 @@ from neurovoxel.components.model_runner import render_model_runner
 from neurovoxel.components.user_input import (
     render_analysis_param_input,
     render_bids_input,
+    render_outputdir_input,
     render_table_input,
     render_template_input,
 )
@@ -24,6 +25,7 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
+from neurovoxel.utils.viz import save_all_maps
 
 
 @click.command()
@@ -87,6 +89,7 @@ def main(
             st.session_state.entity_df = parse_layout(st.session_state.layout)
 
         render_table_input(autoload)
+        valid_outputdir = render_outputdir_input(autoload)
     with col2:
         render_template_input("Brain template image", "template", autoload)
         valid_mask = render_template_input(
@@ -126,6 +129,15 @@ def main(
 
         st.subheader("Results")
         render_visualization(rhs)
+
+        if valid_outputdir:
+            save_all_maps(
+                Path(st.session_state.get("paths", {}).get("outputdir")),
+                st.session_state.result,
+                st.session_state.masker,
+                lhs,
+                rhs.to_numpy().tolist(),  # pyright: ignore[reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+            )
 
     render_footer()
 

@@ -11,7 +11,8 @@
                 "bids_config": { "type": "string" },
                 "tabular": { "type": "string" },
                 "template": { "type": "string" },
-                "mask": { "type": "string" }
+                "mask": { "type": "string" },
+                "outputdir": {"type": "string"}
             }
         },
         "analysis": {

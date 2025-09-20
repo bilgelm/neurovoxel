@@ -41,6 +41,7 @@ def load_config(config_file: Path) -> dict[str, Any]:
                     "tabular": {"type": "string"},
                     "template": {"type": "string"},
                     "mask": {"type": "string"},
+                    "outputdir": {"type": "string"},
                 },
             },
             "analysis": {
