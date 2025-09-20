@@ -153,7 +153,7 @@ def parse_query(
     query: str,
     allowed_lhs_values: list[str],
     rhs_df: pd.DataFrame,
-) -> tuple[str, Any]:
+) -> tuple[str, pd.Index]:
     """Parse query to extract the left and right hand side."""
     if "~" in query:
         lhs, rhs = query.split("~")
@@ -163,7 +163,7 @@ def parse_query(
             msg = "Imaging outcome in query is invalid"
             raise ValueError(msg)
         x_mat = model_matrix(rhs, rhs_df)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        return lhs, x_mat.columns
+        return lhs, x_mat.columns  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     msg = "Invalid formula syntax: formula should contain '~'"
     raise ValueError(msg)

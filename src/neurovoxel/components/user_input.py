@@ -13,7 +13,7 @@ def render_bids_input(autoload: bool = False) -> bool:
     bids_root_box = st.empty()
     bids_root = bids_root_box.text_input(
         "BIDS root directory",
-        value=st.session_state.paths.get("bids_root", ""),
+        value=st.session_state.paths.get("bids_root"),
         key="bids_root_input",
     )
 
@@ -37,7 +37,7 @@ def render_bids_input(autoload: bool = False) -> bool:
     bids_config_box = st.empty()
     bids_config = bids_config_box.text_input(
         "Optional: Custom BIDS configuration",
-        value=st.session_state.paths.get("bids_config", ""),
+        value=st.session_state.paths.get("bids_config"),
         key="bids_config_input",
     )
 
@@ -142,3 +142,39 @@ def render_table_input(autoload: bool = False) -> bool:
         tabular_box.empty()
 
     return valid_tabular
+
+
+def render_analysis_param_input() -> None:
+    """Input for analysis parameters."""
+    st.session_state.analysis["smoothing_fwhm"] = st.number_input(
+        "Smoothing FWHM (mm) for isotropic Gaussian",
+        min_value=0.0,
+        max_value=15.0,
+        value=st.session_state.get("analysis", {}).get("smoothing_fwhm", 5.0),
+        step=0.5,
+        key="smoothing_fwhm_input",
+    )
+
+    st.session_state.analysis["voxel_size"] = st.number_input(
+        "Voxel size of statistical analysis space (mm, isotropic)",
+        min_value=1.0,
+        max_value=10.0,
+        value=st.session_state.get("analysis", {}).get("voxel_size", 4.0),
+        step=0.5,
+        key="voxel_size_input",
+    )
+
+    st.session_state.analysis["n_perm"] = st.number_input(
+        "Number of permutations",
+        min_value=0,
+        max_value=100000,
+        value=st.session_state.get("analysis", {}).get("n_perm", 1000),
+        step=1,
+        key="n_perm_input",
+    )
+
+    st.session_state.analysis["tfce"] = st.checkbox(
+        "Run TFCE",
+        value=st.session_state.get("analysis", {}).get("tfce", False),
+        key="tfce_input",
+    )
