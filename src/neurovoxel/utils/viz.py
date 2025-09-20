@@ -7,26 +7,35 @@ from re import sub
 from typing import Any, Literal, get_args
 
 import numpy as np
+from nanslice import Layer
+from nanslice.jupyter import slices
 from nibabel.loadsave import (
     save as nib_save,  # pyright: ignore[reportUnknownVariableType]
 )
 from nibabel.nifti1 import Nifti1Image
+from nilearn.image import math_img
 from nilearn.maskers import MultiNiftiMasker
 from nilearn.plotting import plot_stat_map, view_img
 from nilearn.plotting.displays._slicers import OrthoSlicer
 from nilearn.plotting.html_stat_map import StatMapView
 
+# see: https://nilearn.github.io/stable/modules/generated/nilearn.mass_univariate.permuted_ols.html # noqa: E501
 STAT_OPTIONS_LITERAL = Literal[
-    "t",
-    "logp_max_t",
-    "tfce",
-    "logp_max_tfce",
-    "size",
-    "logp_max_size",
-    "mass",
-    "logp_max_mass",
+    "t",  # t-statistic associated with the significance test
+    "tfce",  # TFCE values associated with the significance test
+    "size",  # cluster size values associated with the significance test
+    "mass",  # cluster mass values associated with the significance test
 ]
 STAT_OPTIONS = get_args(STAT_OPTIONS_LITERAL)
+
+P_OPTIONS_LITERAL = Literal[
+    "logp_max_t",  # -log10 family-wise corrected p-values
+    "logp_max_tfce",  # -log10 family-wise corrected p-values
+    "logp_max_size",  # -log10 family-wise corrected cluster-level p-values
+    "logp_max_mass",  # -log10 family-wise corrected cluster-level p-values
+]
+
+P_OPTIONS = get_args(P_OPTIONS_LITERAL)
 
 
 def unmask(
@@ -40,7 +49,7 @@ def basic_viz(
     result: dict[str, np.typing.NDArray[Any]],
     masker: MultiNiftiMasker,
     idx: int,
-    stat: STAT_OPTIONS_LITERAL = "t",
+    stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
     **kwargs: dict[str, Any],
 ) -> OrthoSlicer:
     """Simple visualization."""
@@ -54,7 +63,7 @@ def basic_interactive_viz(  # pyright: ignore[]
     result: dict[str, np.typing.NDArray[Any]],
     masker: MultiNiftiMasker,
     idx: int,
-    stat: STAT_OPTIONS_LITERAL = "t",
+    stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
     **kwargs: dict[str, Any],
 ) -> StatMapView:
     """Simple interactive visualization."""
@@ -64,12 +73,65 @@ def basic_interactive_viz(  # pyright: ignore[]
     )
 
 
+def nanslice_overlay(  # noqa: PLR0913
+    result: dict[str, np.ndarray],
+    masker: MultiNiftiMasker,
+    bg_img: Nifti1Image,
+    idx: int,
+    p_var: P_OPTIONS_LITERAL = "logp_max_t",
+    p_thresh: float = 0.05,
+    cmap: str = "RdYlBu_r",
+    title: str = "Beta overlay",
+) -> None:
+    """Dual-coded visualization.
+
+    Visualize beta coefficients as overlay, alpha controlled by t-statistics,
+    contours from -log10 p-values (e.g., logp_max_t).
+    """
+    if p_var not in result:
+        msg = f"Specified p-value variable {p_var} is not in results"
+        raise ValueError(msg)
+
+    beta_img = unmask(result["beta_coef"][idx, :], masker)
+    alpha_img = math_img(
+        "1 - np.power(10, -img)",
+        img=unmask(result[p_var][idx, :], masker),
+    )
+    contour_level = 1 - p_thresh
+
+    # Create nanslice layers
+    base_layer = Layer(
+        bg_img,
+        cmap="gray",  # gist_gray?
+        label="Brain template",
+    )
+
+    beta_layer = Layer(
+        beta_img,
+        cmap=cmap,
+        alpha=alpha_img,
+        alpha_lim=(0, 1),
+        alpha_label="1 - p",
+        label="Regression coefficient",
+    )
+
+    # Plot with nanslice
+    return slices(
+        [base_layer, beta_layer],
+        nrows=5,
+        ncols=5,
+        cbar=1,
+        contour=contour_level,
+        title=title,
+    )
+
+
 def save_stat_map(
     filename: Path,
     result: dict[str, np.typing.NDArray[Any]],
     masker: MultiNiftiMasker,
     idx: int,
-    stat: STAT_OPTIONS_LITERAL = "t",
+    stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
 ) -> None:
     """Save stat map."""
     nib_save(unmask(result[stat][idx, :], masker), filename)
@@ -85,7 +147,7 @@ def save_all_maps(
     """Save all stat maps."""
     outputdir.mkdir(parents=True, exist_ok=True)
 
-    for stat in STAT_OPTIONS:
+    for stat in STAT_OPTIONS + P_OPTIONS:
         if stat in result:
             for idx in range(result[stat].shape[0]):
                 # <source>_contrast-<label>_stat-<label>_<mod>map.nii.gz

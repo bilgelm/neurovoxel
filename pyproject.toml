@@ -48,6 +48,9 @@ dev = [
 [tool.uv]
 package = true
 
+[tool.uv.sources]
+nanslice = { git = "https://github.com/bilgelm/nanslice.git" }
+
 [project.scripts]
 neurovoxel = "neurovoxel.cli:main"
 neurovoxel-app = "neurovoxel.cli:run_app"
