@@ -168,7 +168,7 @@ def render_analysis_param_input() -> None:
         "Number of permutations",
         min_value=0,
         max_value=100000,
-        value=st.session_state.get("analysis", {}).get("n_perm", 1000),
+        value=st.session_state.get("analysis", {}).get("n_perm", 10000),
         step=1,
         key="n_perm_input",
     )
