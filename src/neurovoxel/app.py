@@ -2,9 +2,9 @@
 
 # pyright: reportMissingTypeStubs=false
 
+import argparse
 from pathlib import Path
 
-import click
 import streamlit as st
 
 from neurovoxel.components.data import render_entity_table
@@ -28,20 +28,17 @@ from neurovoxel.utils.load_parse import (
 from neurovoxel.utils.viz import save_all_maps
 
 
-@click.command()
-@click.option(
-    "--config-file",
-    type=click.Path(exists=True, readable=True, file_okay=True, dir_okay=False),
-    help="NeuroVoxel configuration file.",
-)
-@click.option("--autoload", is_flag=True, help="Autoload paths")
-@click.option("--test-mode", is_flag=True, help="Enable test mode")
 def main(
     config_file: Path | None = None,
     autoload: bool = False,
     test_mode: bool = False,
 ) -> None:
-    """Main entry point for the NeuroVoxel Streamlit app."""
+    """Main entry point for the NeuroVoxel Streamlit app.
+
+    This function is callable directly (useful for tests). When run as a
+    script, the argparse-based CLI in the ``__main__`` block parses
+    command-line flags and calls this function.
+    """
     st.set_page_config(page_title="NeuroVoxel", layout="wide")
 
     render_header()
@@ -142,5 +139,38 @@ def main(
     render_footer()
 
 
+def _parse_args() -> argparse.Namespace:
+    """Parse command line arguments using argparse.
+
+    Mirrors the previous click options:
+      --config-file <path>
+      --autoload (flag)
+      --test-mode (flag)
+    """
+    parser = argparse.ArgumentParser(prog="neurovoxel")
+    parser.add_argument(
+        "--config-file",
+        type=Path,
+        help="NeuroVoxel configuration file.",
+    )
+    parser.add_argument(
+        "--autoload",
+        action="store_true",
+        help="Autoload paths",
+    )
+    parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help="Enable test mode",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = _parse_args()
+    # argparse will have converted --config-file to a Path (or None)
+    main(
+        config_file=args.config_file,
+        autoload=args.autoload,
+        test_mode=args.test_mode,
+    )
