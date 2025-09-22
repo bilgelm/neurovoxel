@@ -1,21 +1,20 @@
 """Conduct statistical analysis."""
 
+# pyright: reportMissingTypeStubs=false
+
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from bids.layout.models import (  # pyright: ignore[reportMissingTypeStubs]
-    BIDSImageFile,
-)
-from formulaic import (  # pyright: ignore[reportMissingTypeStubs]
+from bids.layout.models import BIDSImageFile
+from formulaic import (
     model_matrix,  # pyright: ignore[reportUnknownVariableType]
 )
 from nibabel.nifti1 import Nifti1Image
-from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
-    MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
-)
-from nilearn.mass_univariate import (  # pyright: ignore[reportMissingTypeStubs]
-    permuted_ols,  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
+from nilearn.glm import OLSModel
+from nilearn.maskers import MultiNiftiMasker
+from nilearn.mass_univariate import (
+    permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
 
 MIN_N_OBS = 10  # minimum number of observations required for analysis
@@ -44,7 +43,7 @@ def run_query(  # noqa: PLR0913
     n_perm: int,
     n_jobs: int,
     random_state: int,
-    tfce: bool,  # noqa: FBT001
+    tfce: bool,
     handle_zero_voxels: Literal["keep", "exclude"] = "keep",
 ) -> dict[str, np.typing.NDArray[Any]]:
     """Run permuted OLS given a query, BIDS dataset, and tabular data file."""
@@ -102,7 +101,18 @@ def run_query(  # noqa: PLR0913
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
 
-    return permuted_ols(  # pyright: ignore[reportUnknownVariableType, reportReturnType]
+    # ------------------------------
+    # Compute OLS beta coefficients
+    # ------------------------------
+    ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
+    ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+
+    # ------------------------------
+    # Run permutation-based inference
+    # ------------------------------
+
+    res = permuted_ols(  # pyright: ignore[reportUnknownVariableType]
         tested_vars=x_mat,
         target_vars=y_mat,  # pyright: ignore[reportUnknownArgumentType]
         n_perm=n_perm,
@@ -112,3 +122,7 @@ def run_query(  # noqa: PLR0913
         tfce=tfce,
         output_type="dict",
     )
+
+    # Attach OLS betas explicitly
+    res["beta_coef"] = beta_coef  # pyright: ignore[reportIndexIssue]
+    return res  # pyright: ignore[reportUnknownVariableType, reportReturnType]
