@@ -6,6 +6,9 @@ from typing import Literal
 import pandas as pd
 import streamlit as st
 
+from neurovoxel.utils import MULTI_SES_OPTS, ZERO_VOXEL_OPTS
+from neurovoxel.utils.analysis import STANDARDIZATION_OPTS
+
 
 def render_bids_input(autoload: bool = False) -> bool:
     """Get BIDS directory path and config file (optional)."""
@@ -179,6 +182,40 @@ def render_analysis_param_input() -> None:
         key="tfce_input",
     )
 
+    st.session_state.analysis["handle_zero_voxels"] = st.selectbox(
+        "How should zero-valued voxels be handled?",
+        ZERO_VOXEL_OPTS,
+        index=ZERO_VOXEL_OPTS.index(
+            st.session_state.get("analysis", {}).get(
+                "handle_zero_voxels", ZERO_VOXEL_OPTS[0]
+            )
+        ),
+        key="handle_zero_voxels_input",
+    )
+
+    st.session_state.analysis["handle_multiple_sessions"] = st.selectbox(
+        "For subjects with multiple sessions, "
+        "which session(s) should be included in the analysis?",
+        MULTI_SES_OPTS,
+        index=MULTI_SES_OPTS.index(
+            st.session_state.get("analysis", {}).get(
+                "handle_multiple_sessions", MULTI_SES_OPTS[0]
+            )
+        ),
+        key="handle_multiple_sessions_input",
+    )
+
+    st.session_state.analysis["voxelwise_standardization"] = st.selectbox(
+        "Voxelwise standardization",
+        STANDARDIZATION_OPTS,
+        index=STANDARDIZATION_OPTS.index(
+            st.session_state.get("analysis", {}).get(
+                "voxelwise_standardization", STANDARDIZATION_OPTS[0]
+            )
+        ),
+        key="voxelwise_standardization_input",
+    )
+
 
 def render_outputdir_input(autoload: bool = False) -> bool:
     """Get output directory path."""
@@ -226,3 +263,21 @@ def is_directory_empty(directory_path: Path) -> bool:
         raise ValueError(msg)
 
     return not any(directory_path.iterdir())
+
+
+def render_inference_choices(rhs: pd.Index) -> None:
+    """Checkboxes based on user query for selecting variables to test."""
+    st.text("Select model terms for which to perform inference:")
+    inference_terms: set[str] = set()
+    num_var_cols = 4
+    var_cols = st.columns(num_var_cols)
+    for i, indep_var in enumerate(rhs):
+        with var_cols[i % num_var_cols]:
+            cbox = st.checkbox(
+                indep_var,
+                value=indep_var != "Intercept",
+                key=f"{indep_var}_viz_yes_no",
+            )
+            if cbox:
+                inference_terms.add(indep_var)
+    st.session_state.analysis["inference_terms"] = inference_terms

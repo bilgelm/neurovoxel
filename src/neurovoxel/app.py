@@ -14,6 +14,7 @@ from neurovoxel.components.model_runner import render_model_runner
 from neurovoxel.components.user_input import (
     render_analysis_param_input,
     render_bids_input,
+    render_inference_choices,
     render_outputdir_input,
     render_table_input,
     render_template_input,
@@ -31,21 +32,16 @@ from neurovoxel.utils.viz import save_all_maps
 def main(
     config_file: Path | None = None,
     autoload: bool = False,
-    test_mode: bool = False,
 ) -> None:
     """Main entry point for the NeuroVoxel Streamlit app.
 
-    This function is callable directly (useful for tests). When run as a
-    script, the argparse-based CLI in the ``__main__`` block parses
+    This function is callable directly. When run as a script,
+    the argparse-based CLI in the ``__main__`` block parses
     command-line flags and calls this function.
     """
     st.set_page_config(page_title="NeuroVoxel", layout="wide")
 
     render_header()
-
-    # Banner for testing environment
-    if test_mode:
-        st.warning("**Site is running in TESTING environment**", icon="⚠️")
 
     st.session_state.setdefault("paths", {})
     st.session_state.setdefault("analysis", {})
@@ -117,6 +113,8 @@ def main(
                 st.session_state.tbl,
             )
 
+            render_inference_choices(rhs)
+
     run_btn = st.button(
         "Run analysis",
         disabled=not (lhs and valid_mask),
@@ -125,16 +123,21 @@ def main(
         render_model_runner(lhs)
 
         st.subheader("Results")
-        render_visualization(rhs)
+        summary_stats = st.session_state.tbl.describe()
+        st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
+
+        render_visualization(st.session_state.analysis["inference_terms"])
 
         if valid_outputdir:
+            outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
             save_all_maps(
-                Path(st.session_state.get("paths", {}).get("outputdir")),
+                outpath,
                 st.session_state.result,
                 st.session_state.masker,
                 lhs,
-                rhs.to_numpy().tolist(),  # pyright: ignore[reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
             )
+            # save tbl
+            st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
 
     render_footer()
 
@@ -145,7 +148,6 @@ def _parse_args() -> argparse.Namespace:
     Mirrors the previous click options:
       --config-file <path>
       --autoload (flag)
-      --test-mode (flag)
     """
     parser = argparse.ArgumentParser(prog="neurovoxel")
     parser.add_argument(
@@ -158,11 +160,6 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Autoload paths",
     )
-    parser.add_argument(
-        "--test-mode",
-        action="store_true",
-        help="Enable test mode",
-    )
     return parser.parse_args()
 
 
@@ -172,5 +169,4 @@ if __name__ == "__main__":
     main(
         config_file=args.config_file,
         autoload=args.autoload,
-        test_mode=args.test_mode,
     )

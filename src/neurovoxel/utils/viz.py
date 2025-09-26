@@ -19,8 +19,11 @@ from nilearn.plotting import plot_stat_map, view_img
 from nilearn.plotting.displays._slicers import OrthoSlicer
 from nilearn.plotting.html_stat_map import StatMapView
 
+from neurovoxel.utils.analysis import PermutedOLSResult
+
 # see: https://nilearn.github.io/stable/modules/generated/nilearn.mass_univariate.permuted_ols.html # noqa: E501
 STAT_OPTIONS_LITERAL = Literal[
+    "beta",  # regression coefficient
     "t",  # t-statistic associated with the significance test
     "tfce",  # TFCE values associated with the significance test
     "size",  # cluster size values associated with the significance test
@@ -46,38 +49,46 @@ def unmask(
 
 
 def basic_viz(
-    result: dict[str, np.typing.NDArray[Any]],
+    result: PermutedOLSResult,
     masker: MultiNiftiMasker,
-    idx: int,
+    term: str,
     stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
     **kwargs: dict[str, Any],
 ) -> OrthoSlicer:
     """Simple visualization."""
-    return plot_stat_map(
-        unmask(result[stat][idx, :], masker),
-        **kwargs,
-    )
+    if stat in result:
+        idx = result["tested_var_names"].index(term)
+        return plot_stat_map(
+            unmask(result[stat][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            **kwargs,
+        )
+    msg = f"{stat} is not in results"
+    raise KeyError(msg)
 
 
 def basic_interactive_viz(  # pyright: ignore[]
-    result: dict[str, np.typing.NDArray[Any]],
+    result: PermutedOLSResult,
     masker: MultiNiftiMasker,
-    idx: int,
+    term: str,
     stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
     **kwargs: dict[str, Any],
 ) -> StatMapView:
     """Simple interactive visualization."""
-    return view_img(
-        unmask(result[stat][idx, :], masker),
-        **kwargs,
-    )
+    if stat in result:
+        idx = result["tested_var_names"].index(term)
+        return view_img(
+            unmask(result[stat][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            **kwargs,
+        )
+    msg = f"{stat} is not in results"
+    raise KeyError(msg)
 
 
 def nanslice_overlay(  # noqa: PLR0913
-    result: dict[str, np.ndarray],
+    result: PermutedOLSResult,
     masker: MultiNiftiMasker,
     bg_img: Nifti1Image,
-    idx: int,
+    term: str,
     p_var: P_OPTIONS_LITERAL = "logp_max_t",
     p_thresh: float = 0.05,
     cmap: str = "RdYlBu_r",
@@ -92,10 +103,11 @@ def nanslice_overlay(  # noqa: PLR0913
         msg = f"Specified p-value variable {p_var} is not in results"
         raise ValueError(msg)
 
-    beta_img = unmask(result["beta_coef"][idx, :], masker)
+    idx = result["tested_var_names"].index(term)
+    beta_img = unmask(result["beta"][idx, :], masker)
     alpha_img = math_img(
         "1 - np.power(10, -img)",
-        img=unmask(result[p_var][idx, :], masker),
+        img=unmask(result[p_var][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
     )
     contour_level = 1 - p_thresh
 
@@ -142,9 +154,9 @@ def save_all_maps(
     result: dict[str, np.typing.NDArray[Any]],
     masker: MultiNiftiMasker,
     imgvar: str,
-    testedvars: list[str],
 ) -> None:
     """Save all stat maps."""
+    testedvars = result["tested_var_names"]
     outputdir.mkdir(parents=True, exist_ok=True)
 
     for stat in STAT_OPTIONS + P_OPTIONS:
@@ -152,8 +164,9 @@ def save_all_maps(
             for idx in range(result[stat].shape[0]):
                 # <source>_contrast-<label>_stat-<label>_<mod>map.nii.gz
                 testedvar = sub(r"[^\w]", "", testedvars[idx])
+                stt = stat.replace("_", "")
                 filename = (
                     outputdir
-                    / f"{imgvar}_contrast-{testedvar}_stat-{stat}_map.nii.gz"
+                    / f"{imgvar}_contrast-{testedvar}_stat-{stt}_map.nii.gz"
                 )
                 save_stat_map(filename, result, masker, idx, stat)

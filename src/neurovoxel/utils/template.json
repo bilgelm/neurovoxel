@@ -22,7 +22,8 @@
                 "smoothing_fwhm": {
                     "type": "number",
                     "minimum": 0.0,
-                    "maximum": 15.0
+                    "maximum": 15.0,
+                    "units": "mm"
                 },
                 "voxel_size": {
                     "type": "number",
@@ -34,8 +35,15 @@
                     "minimum": 0,
                     "maximum": 100000
                 },
-                "random_seed": {"type": "integer"},
-                "tfce": {"type": "boolean"}
+                "random_seed": { "type": "integer" },
+                "tfce": { "type": "boolean" },
+                "handle_zero_voxels": { "enum": ["keep", "exclude"] },
+                "handle_multiple_sessions": {
+                    "enum": ["first", "last", "random", "all"]
+                },
+                "voxelwise_standardization": {
+                    "enum": ["scale", "center", "none"]
+                }
             }
         }
     }

@@ -18,8 +18,6 @@ def render_model_runner(lhs: str) -> None:
         **row.to_dict(orient="records")[0],  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
     )
 
-    st.info(f"Analysis will include up to {len(images)} {lhs} images")
-
     with st.spinner("Running analysis..."):
         # call relevant function from neurovoxel
         st.session_state.masker = get_masker(
@@ -29,8 +27,9 @@ def render_model_runner(lhs: str) -> None:
             n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
         )
 
-        st.session_state.result = run_query(
+        st.session_state.result, st.session_state.tbl = run_query(
             st.session_state.get("analysis", {}).get("query"),
+            st.session_state.get("analysis", {}).get("inference_terms"),
             st.session_state.tbl,
             images,  # pyright: ignore[reportUnknownArgumentType]
             st.session_state.masker,
@@ -40,4 +39,10 @@ def render_model_runner(lhs: str) -> None:
                 "random_state", 42
             ),
             tfce=st.session_state.get("analysis", {}).get("tfce"),
+            handle_zero_voxels=st.session_state.get("analysis", {}).get(
+                "handle_zero_voxels"
+            ),
+            handle_multiple_sessions=st.session_state.get("analysis", {}).get(
+                "handle_multiple_sessions"
+            ),
         )

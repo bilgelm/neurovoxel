@@ -20,7 +20,7 @@ def render_entity_table(entity_df: DataFrame) -> DataFrame:
         entity_df,
         disabled=disabled_cols,
         key="entity_table_editor",
-        use_container_width=True,
+        width="content",
         column_order=cols,
         hide_index=True,
     )

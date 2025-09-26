@@ -12,13 +12,13 @@ from neurovoxel.utils.viz import (
 )
 
 
-def render_visualization(rhs: Index) -> None:
+def render_visualization(inference_terms: Index) -> None:
     """Render the visualization UI for NeuroVoxel app."""
-    for idx, variable in enumerate(rhs):  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+    for variable in inference_terms:  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
         html_view = basic_interactive_viz(
             st.session_state.result,
             st.session_state.masker,
-            idx=idx,
+            term=variable,
             stat="t",
             bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
             opacity=0.5,  # pyright: ignore[reportArgumentType]
@@ -32,7 +32,7 @@ def render_visualization(rhs: Index) -> None:
             st.session_state.result,
             st.session_state.masker,
             bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
-            idx=idx,
+            term=variable,
             p_var="logp_max_t",
             p_thresh=p_thresh,
             title=(
@@ -40,4 +40,4 @@ def render_visualization(rhs: Index) -> None:
                 f"corrected p < {p_thresh} contours for {variable}"
             ),
         )
-        st.pyplot(fig)
+        st.pyplot(fig, width=1300)

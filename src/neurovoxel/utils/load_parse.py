@@ -15,6 +15,8 @@ from formulaic import (
     model_matrix,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from neurovoxel.utils import SCHEMA
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -26,51 +28,7 @@ def load_config(config_file: Path) -> dict[str, Any]:
     with config_file.open("r") as f:
         config = json.load(f)
 
-    # better to read in from data/template.json instead
-    schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "NeuroVoxel",
-        "description": "NeuroVoxel configuration file schema",
-        "type": "object",
-        "properties": {
-            "paths": {
-                "type": "object",
-                "properties": {
-                    "bids_root": {"type": "string"},
-                    "bids_config": {"type": "string"},
-                    "tabular": {"type": "string"},
-                    "template": {"type": "string"},
-                    "mask": {"type": "string"},
-                    "outputdir": {"type": "string"},
-                },
-            },
-            "analysis": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "smoothing_fwhm": {
-                        "type": "number",
-                        "minimum": 0.0,
-                        "maximum": 15.0,
-                    },
-                    "voxel_size": {
-                        "type": "number",
-                        "minimum": 1.0,
-                        "maximum": 10.0,
-                    },
-                    "n_perm": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 100000,
-                    },
-                    "random_seed": {"type": "integer"},
-                    "tfce": {"type": "boolean"},
-                },
-            },
-        },
-    }
-
-    jsonschema.validate(config, schema)
+    jsonschema.validate(config, SCHEMA)
 
     return config
 
