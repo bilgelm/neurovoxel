@@ -204,6 +204,13 @@ def render_analysis_param_input() -> None:
         ),
         key="handle_multiple_sessions_input",
     )
+    # Warn if user selects "all" about violation of independence of observations
+    if st.session_state.analysis.get("handle_multiple_sessions") == "all":
+        st.warning(
+            "Selecting 'all' sessions may violate the independence of "
+            "observations assumption for linear regression. "
+            "Consider using one session per subject."
+        )
 
     st.session_state.analysis["voxelwise_standardization"] = st.selectbox(
         "Voxelwise standardization",
