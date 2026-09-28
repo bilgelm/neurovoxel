@@ -25,6 +25,7 @@ authors = [
 
 requires-python = "~=3.13.0"
 dependencies = [
+    "atlasreader",
     "bids2table[pybids]>=2.3.1",
     "bidsschematools>=1.0.14",
     "click>=8.2.1",
@@ -53,6 +54,7 @@ package = true
 
 [tool.uv.sources]
 nanslice = { git = "https://github.com/bilgelm/nanslice.git" }
+atlasreader = { git = "https://github.com/NIA-IRP/atlasreader.git" }
 
 [project.scripts]
 neurovoxel = "neurovoxel.cli:main"
