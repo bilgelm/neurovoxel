@@ -37,11 +37,9 @@ def _load_dataset() -> None:
     info_loading_bids_box.info("Loading BIDS dataset...")
     st.session_state.layout = load_bids(
         bids_root=Path(st.session_state.get("paths", {}).get("bids_root")),
-        cache_path=Path(
-            st.session_state.get("paths", {}).get("bids_cache")
-        )
+        cache_path=Path(st.session_state.get("paths", {}).get("bids_cache"))
         if st.session_state.get("paths", {}).get("bids_cache")
-        else None
+        else None,
     )
     info_loading_bids_box.empty()
     st.toast("BIDS dataset loaded successfully!")
