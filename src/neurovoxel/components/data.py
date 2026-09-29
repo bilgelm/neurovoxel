@@ -28,7 +28,7 @@ def render_entity_table(entity_df: DataFrame) -> DataFrame:
     if "name" in edited_df and edited_df["name"].duplicated().any():
         st.error(
             "Entries in the 'name' column must be unique. "
-            "Please fix duplicates before continuing."
+            "Please fix duplicates by editing the names in the names column."
         )
 
     return edited_df

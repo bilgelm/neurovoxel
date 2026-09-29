@@ -15,7 +15,7 @@ def render_bids_input(autoload: bool = False) -> bool:
     # Use a text input for the BIDS root directory path
     bids_root_box = st.empty()
     bids_root = bids_root_box.text_input(
-        "BIDS root directory",
+        "BIDS derivatives directory",
         value=st.session_state.paths.get("bids_root"),
         key="bids_root_input",
     )
@@ -23,6 +23,8 @@ def render_bids_input(autoload: bool = False) -> bool:
     # Update session state if the input changes
     if bids_root:
         st.session_state.paths["bids_root"] = bids_root
+    else:
+        st.session_state.paths.pop("bids_root", None)
 
     valid_bids = False
     if st.session_state.get("paths", {}).get("bids_root"):
@@ -36,34 +38,31 @@ def render_bids_input(autoload: bool = False) -> bool:
     else:
         st.write("❗️ No BIDS root directory selected.")
 
-    # Use a text input for a custom BIDS config file
-    bids_config_box = st.empty()
-    bids_config = bids_config_box.text_input(
-        "Optional: Custom BIDS configuration",
-        value=st.session_state.paths.get("bids_config"),
-        key="bids_config_input",
+    # Input for cache datasets
+    bids_cache_box = st.empty()
+    bids_cache = bids_cache_box.text_input(
+        "Optional: BIDS parquet cache file",
+        value=st.session_state.paths.get("bids_cache"),
+        key="bids_cache_input",
     )
 
-    # Update session state if the input changes
-    if bids_config:
-        st.session_state.paths["bids_config"] = bids_config
-
-    bids_config_path: Path | None = None
-    if st.session_state.get("paths", {}).get("bids_config"):
-        bids_config_path = Path(
-            st.session_state.get("paths", {}).get("bids_config")
-        )
-        if not bids_config_path.is_file():
-            valid_bids = False
-            st.error(f"File does not exist: {bids_config_path}")
+    if bids_cache:
+        st.session_state.paths["bids_cache"] = bids_cache
     else:
-        st.write(
-            "No custom BIDS config file selected. Will use default BIDS config."
+        st.session_state.paths.pop("bids_cache", None)
+
+    bids_cache_path: Path | None = None
+    if st.session_state.get("paths", {}).get("bids_cache"):
+        bids_cache_path = Path(
+            st.session_state.get("paths", {}).get("bids_cache")
         )
+        if not bids_cache_path.is_file():
+            valid_bids = False
+            st.error(f"File does not exist: {bids_cache_path}")
 
     if autoload and valid_bids:
         bids_root_box.empty()
-        bids_config_box.empty()
+        bids_cache_box.empty()
 
     return valid_bids
 
@@ -288,3 +287,32 @@ def render_inference_choices(rhs: pd.Index) -> None:
             if cbox:
                 inference_terms.add(indep_var)
     st.session_state.analysis["inference_terms"] = inference_terms
+
+
+def parameter_output(  # noqa: PLR0913
+    paths: dict[str, str],
+    analysis: dict[str, str | float | int | bool | None],
+    version: str,
+    timestamp: str,
+    commit: str,
+    statistical_maps: list[str],
+    tabular_summary: str,
+    packages: dict[str, str],
+) -> dict[
+    str,
+    dict[str, str]
+    | dict[str, str | float | int | bool | None]
+    | str
+    | list[str],
+]:
+    """Return a dictionary of parameters for saving."""
+    return {
+        "paths": paths,
+        "analysis": analysis,
+        "version": version,
+        "timestamp (UTC)": timestamp,
+        "commit": commit,
+        "statistical maps in output folder": statistical_maps,
+        "tabular summary in output folder": tabular_summary,
+        "packages": packages,
+    }

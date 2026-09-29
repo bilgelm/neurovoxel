@@ -2,6 +2,7 @@
 
 # pyright: reportMissingTypeStubs=false
 
+from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
 import numpy as np
@@ -63,6 +64,7 @@ def get_masker(
 
 def run_query(  # noqa: PLR0913
     query: str,
+    root: Path,
     inference_terms: set[str],
     tbl: pd.DataFrame,
     images: list[BIDSImageFile],
@@ -96,9 +98,9 @@ def run_query(  # noqa: PLR0913
                 image_df,
                 pd.DataFrame(
                     {
-                        "subject": image.entities["subject"],
-                        "session": image.entities["session"],
-                        lhs: image.path,
+                        "subject": image.get_entities()["sub"],
+                        "session": image.get_entities()["ses"],
+                        lhs: root / image.path,
                     },
                     index=[index],
                 ),

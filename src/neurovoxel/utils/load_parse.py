@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import jsonschema
 import pandas as pd
-from bids.layout import BIDSLayout
+from bids2table.pybids import (
+    BIDSFile,
+    BIDSLayout,  # pyright: ignore[reportUnknownVariableType]
+)
 from formulaic import (
     model_matrix,  # pyright: ignore[reportUnknownVariableType]
 )
@@ -19,8 +23,6 @@ from neurovoxel.utils import SCHEMA
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from bids.layout.models import BIDSImageFile
 
 
 def load_config(config_file: Path) -> dict[str, Any]:
@@ -35,23 +37,13 @@ def load_config(config_file: Path) -> dict[str, Any]:
 
 def load_bids(
     bids_root: Path,
-    config_fname: Path | None = None,
-    database_path: Path | None = None,
+    cache_path: Path | None = None,
 ) -> BIDSLayout:
     """Load BIDS dataset."""
-    layout = BIDSLayout(
-        bids_root,
-        validate=False,
-        derivatives=False,
-        config=["bids", "derivatives", config_fname] if config_fname else None,
-        database_path=database_path,
+    return BIDSLayout(
+        root=bids_root,  # bids_root/derivatives
+        cache_path=cache_path,  # should be corresponding to derivatives
     )
-
-    layout.add_derivatives(  # pyright: ignore[reportUnknownMemberType]
-        bids_root / "derivatives",
-        config=["bids", "derivatives", config_fname] if config_fname else None,
-    )
-    return layout
 
 
 def parse_layout(layout: BIDSLayout) -> pd.DataFrame:
@@ -64,15 +56,15 @@ def parse_layout(layout: BIDSLayout) -> pd.DataFrame:
         DataFrame of image types.
     """
     # list available imaging outcomes
-    img_list: list[BIDSImageFile] = layout.get(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        extension="nii.gz"
-    ) + layout.get(extension="nii")  # pyright: ignore[reportUnknownMemberType]
+    img_list: list[BIDSFile] = layout.get(extension=".nii.gz") + layout.get(
+        extension=".nii"
+    )  # pyright: ignore[reportAssignmentType, reportUnknownMemberType]
     img_type_counts: dict[tuple[tuple[str, object], ...], int] = {}
     entity_df = pd.DataFrame()
 
     for img in img_list:
-        entities = deepcopy(img.entities)
-        for k in ("subject", "session"):
+        entities = deepcopy(img.get_entities())
+        for k in ("sub", "ses"):
             entities.pop(k, None)
         key = tuple(entities.items())
         if key in img_type_counts:
@@ -84,10 +76,17 @@ def parse_layout(layout: BIDSLayout) -> pd.DataFrame:
             img_type_counts[key] = 1
 
     entity_df = entity_df.drop(
-        ["SpatialReference", "extension", "tracer"], axis=1, errors="ignore"
+        ["SpatialReference", "ext", "tracer"], axis=1, errors="ignore"
     )
+    sort_cols = [
+        col
+        for col in ["datatype", "suffix", "desc", "param"]
+        if col in entity_df.columns
+    ]
+
     entity_df = entity_df.sort_values(
-        by=["datatype", "suffix", "desc", "param"], na_position="last"
+        by=sort_cols,
+        na_position="last",
     ).reset_index(drop=True)
 
     def concat_name(row: pd.Series) -> str:

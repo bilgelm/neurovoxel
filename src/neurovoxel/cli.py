@@ -9,7 +9,10 @@ import click
 @click.command()
 @click.option("--config-file", help="NeuroVoxel configuration file.")
 @click.option("--autoload", is_flag=True, help="Autoload paths")
-def run_app(config_file: str | None = None, autoload: bool = False) -> None:
+@click.option("--debug", is_flag=True, help="Enable debug mode")
+def run_app(
+    config_file: str | None = None, autoload: bool = False, debug: bool = False
+) -> None:
     """Start the NeuroVoxel streamlit app."""
     streamlit_app_path = "src/neurovoxel/app.py"
     cmd = [
@@ -22,12 +25,14 @@ def run_app(config_file: str | None = None, autoload: bool = False) -> None:
         "none",
     ]
     # if there are any options specified, need to first insert "--"
-    if config_file or autoload:
+    if config_file or autoload or debug:
         cmd = [*cmd, "--"]
         if config_file:
             cmd = [*cmd, "--config-file", config_file]
         if autoload:
             cmd = [*cmd, "--autoload"]
+        if debug:
+            cmd = [*cmd, "--debug"]
     subprocess.run(cmd, check=False)  # noqa: S603
 
 

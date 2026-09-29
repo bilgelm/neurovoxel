@@ -25,8 +25,11 @@ authors = [
 
 requires-python = "~=3.13.0"
 dependencies = [
+    "bids2table[pybids]>=2.3.1",
+    "bidsschematools>=1.0.14",
     "click>=8.2.1",
     "formulaic>=1.2.0",
+    "importlib>=1.0.4",
     "jsonschema>=4.25.0",
     "nanslice>=1.1",
     "nilearn>=0.12.0",

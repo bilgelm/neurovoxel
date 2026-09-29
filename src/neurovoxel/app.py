@@ -12,6 +12,7 @@ from neurovoxel.components.footer import render_footer
 from neurovoxel.components.header import render_header
 from neurovoxel.components.model_runner import render_model_runner
 from neurovoxel.components.user_input import (
+    parameter_output,
     render_analysis_param_input,
     render_bids_input,
     render_inference_choices,
@@ -26,12 +27,78 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
-from neurovoxel.utils.viz import save_all_maps
+from neurovoxel.utils.output import VERSION, commit, packages, timestamp
+from neurovoxel.utils.viz import save_all_maps, save_parameters
+
+
+def _load_dataset() -> None:
+    """Load the configured BIDS dataset into session state."""
+    info_loading_bids_box = st.empty()
+    info_loading_bids_box.info("Loading BIDS dataset...")
+    st.session_state.layout = load_bids(
+        bids_root=Path(st.session_state.get("paths", {}).get("bids_root")),
+        cache_path=Path(st.session_state.get("paths", {}).get("bids_cache"))
+        if st.session_state.get("paths", {}).get("bids_cache")
+        else None,
+    )
+    info_loading_bids_box.empty()
+    st.toast("BIDS dataset loaded successfully!")
+    st.session_state.entity_df = parse_layout(st.session_state.layout)
+
+
+def _handle_query() -> tuple[str | None, object | None]:
+    query = st.text_input(
+        "Enter query",
+        value=st.session_state.get("analysis", {}).get("query"),
+        key="query_input",
+    )
+    lhs = rhs = None
+    if query:
+        st.session_state.analysis["query"] = query
+        if "entity_df" in st.session_state:
+            lhs, rhs = parse_query(
+                st.session_state.analysis["query"],
+                st.session_state.entity_df["name"].tolist(),
+                st.session_state.tbl,
+            )
+            render_inference_choices(rhs)
+    return lhs, rhs
+
+
+def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
+    """Render and optionally save the completed analysis."""
+    render_model_runner(lhs)
+    st.subheader("Results")
+    summary_stats = st.session_state.tbl.describe()
+    st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
+    render_visualization(st.session_state.analysis["inference_terms"])
+
+    if valid_outputdir:
+        outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
+        analysis = st.session_state.analysis.copy()
+        analysis.pop("inference_terms", None)
+        statistical_maps = save_all_maps(
+            outpath,
+            st.session_state.result,
+            st.session_state.masker,
+            lhs,
+        )
+        st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
+        output_parameters = parameter_output(
+            st.session_state.paths,
+            analysis,
+            VERSION,
+            timestamp,
+            commit,
+            statistical_maps,
+            "tbl.csv",
+            packages,
+        )
+        save_parameters(outpath / "parameters.json", output_parameters)
 
 
 def main(
-    config_file: Path | None = None,
-    autoload: bool = False,
+    config_file: Path | None = None, autoload: bool = False, debug: bool = False
 ) -> None:
     """Main entry point for the NeuroVoxel Streamlit app.
 
@@ -40,11 +107,10 @@ def main(
     command-line flags and calls this function.
     """
     st.set_page_config(page_title="NeuroVoxel", layout="wide")
-
     render_header()
-
     st.session_state.setdefault("paths", {})
     st.session_state.setdefault("analysis", {})
+
     if config_file:
         st.info(f"Using NeuroVoxel configuration file: {config_file}")
         config = load_config(Path(config_file))
@@ -55,41 +121,34 @@ def main(
         st.session_state.paths.update(config.get("paths", {}))
         st.session_state.analysis.update(config.get("analysis", {}))
 
-    col1, col2 = st.columns(2)
-    with col1:
-        valid_bids = render_bids_input(autoload)
+    with st.container():
+        # left/right UI setup
+        col1, col2 = st.columns(2)
+        with col1:
+            valid_bids = render_bids_input(autoload)
 
-        # Button to load dataset, enabled only if BIDS root directory is valid
-        load_btn = (
-            True
-            if autoload and valid_bids
-            else st.button("Load BIDS dataset", disabled=not valid_bids)
-        )
-
-        if load_btn:
-            info_loading_bids_box = st.empty()
-            info_loading_bids_box.info("Loading BIDS dataset...")
-            st.session_state.layout = load_bids(
-                bids_root=Path(
-                    st.session_state.get("paths", {}).get("bids_root")
-                ),
-                config_fname=Path(
-                    st.session_state.get("paths", {}).get("bids_config")
-                ),
+            # Button to load dataset, enabled only if
+            # BIDS root directory is valid
+            load_btn = (
+                True
+                if autoload and valid_bids
+                else st.button("Load BIDS dataset", disabled=not valid_bids)
             )
-            info_loading_bids_box.empty()
-            st.toast("BIDS dataset loaded successfully!")
-            st.session_state.entity_df = parse_layout(st.session_state.layout)
 
-        render_table_input(autoload)
-        valid_outputdir = render_outputdir_input(autoload)
-    with col2:
-        render_template_input("Brain template image", "template", autoload)
-        valid_mask = render_template_input(
-            "Binary brain mask specifying voxels to analyze", "mask", autoload
-        )
-        with st.expander("Advanced"):
-            render_analysis_param_input()
+            if load_btn:
+                _load_dataset()
+
+            render_table_input(autoload)
+            valid_outputdir = render_outputdir_input(autoload)
+        with col2:
+            render_template_input("Brain template image", "template", autoload)
+            valid_mask = render_template_input(
+                "Binary brain mask specifying voxels to analyze",
+                "mask",
+                autoload,
+            )
+            with st.expander("Advanced"):
+                render_analysis_param_input()
 
     if "entity_df" in st.session_state:
         # Render editable table; save any user edits to session state
@@ -97,49 +156,16 @@ def main(
             st.session_state.entity_df
         )
 
-    query = st.text_input(
-        "Enter query",
-        value=st.session_state.get("analysis", {}).get("query"),
-        key="query_input",
-    )
+    lhs, rhs = _handle_query()
 
-    lhs = rhs = None
-    if query:
-        st.session_state.analysis["query"] = query
-        if "entity_df" in st.session_state:
-            lhs, rhs = parse_query(
-                st.session_state.analysis["query"],
-                st.session_state.entity_df["name"].tolist(),
-                st.session_state.tbl,
-            )
-
-            render_inference_choices(rhs)
-
-    run_btn = st.button(
-        "Run analysis",
-        disabled=not (lhs and valid_mask),
-    )
-    if run_btn and lhs and (rhs is not None):
-        render_model_runner(lhs)
-
-        st.subheader("Results")
-        summary_stats = st.session_state.tbl.describe()
-        st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
-
-        render_visualization(st.session_state.analysis["inference_terms"])
-
-        if valid_outputdir:
-            outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
-            save_all_maps(
-                outpath,
-                st.session_state.result,
-                st.session_state.masker,
-                lhs,
-            )
-            # save tbl
-            st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
+    run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
+    if run_btn and lhs and rhs is not None:
+        _save_analysis_results(lhs, valid_outputdir)
 
     render_footer()
+    if debug:
+        with st.expander("Session State"):
+            st.write(st.session_state)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -148,6 +174,7 @@ def _parse_args() -> argparse.Namespace:
     Mirrors the previous click options:
       --config-file <path>
       --autoload (flag)
+      --debug (flag)
     """
     parser = argparse.ArgumentParser(prog="neurovoxel")
     parser.add_argument(
@@ -160,13 +187,15 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Autoload paths",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
     # argparse will have converted --config-file to a Path (or None)
-    main(
-        config_file=args.config_file,
-        autoload=args.autoload,
-    )
+    main(config_file=args.config_file, autoload=args.autoload, debug=args.debug)

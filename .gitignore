@@ -16,3 +16,6 @@ wheels/
 
 # Caches
 *_cache/
+
+# macOS files
+.DS_Store
