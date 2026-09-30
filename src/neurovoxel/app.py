@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 import streamlit as st
+from atlasreader import create_output  # type: ignore  # noqa: PGH003
 
 from neurovoxel.components.data import render_entity_table
 from neurovoxel.components.footer import render_footer
@@ -83,6 +84,17 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             st.session_state.masker,
             lhs,
         )
+        atlasreader_output_path = outpath / "atlasreader_output"
+        atlasreader_output_path.mkdir(exist_ok=True)
+        create_output(
+            outpath / statistical_maps[1],
+            cluster_extent=st.session_state["cluster size"],
+            atlas="blsa_muse",
+            outdir=atlasreader_output_path,
+        )
+        atlasreader_output = [
+            file_path.name for file_path in atlasreader_output_path.glob("*")
+        ]
         st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
         output_parameters = parameter_output(
             st.session_state.paths,
@@ -92,6 +104,7 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             commit,
             statistical_maps,
             "tbl.csv",
+            atlasreader_output,
             packages,
         )
         save_parameters(outpath / "parameters.json", output_parameters)
