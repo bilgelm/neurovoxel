@@ -220,14 +220,40 @@ def render_analysis_param_input() -> None:
         ),
         key="voxelwise_standardization_input",
     )
-    st.session_state["cluster size"] = st.number_input(
-        "Cluster size for atlasreader output",
-        min_value=0,
-        max_value=20,
-        value=st.session_state.get("analysis", {}).get("cluster_size", 10),
-        step=1,
-        key="cluster_size_input",
-    )
+
+    st.subheader("Cluster conversion (for atlasreader output)")
+
+    def voxels_to_mm3() -> None:
+        voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+        st.session_state["cluster_volume_mm3"] = (
+            st.session_state["cluster_size_voxels"] * voxel_volume
+        )
+
+    def mm3_to_voxels() -> None:
+        voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+        st.session_state["cluster_size_voxels"] = round(
+            st.session_state["cluster_volume_mm3"] / voxel_volume
+        )
+
+    subcol1, subcol2 = st.columns(2)
+
+    with subcol1:
+        st.session_state["cluster size"] = st.number_input(
+            "Voxel amount",
+            min_value=0,
+            step=1,
+            key="cluster_size_voxels",
+            on_change=voxels_to_mm3,
+        )
+
+    with subcol2:
+        st.number_input(
+            "Cluster volume (mm³)",
+            min_value=0.0,
+            step=1.0,
+            key="cluster_volume_mm3",
+            on_change=mm3_to_voxels,
+        )
 
 
 def render_outputdir_input(autoload: bool = False) -> bool:
