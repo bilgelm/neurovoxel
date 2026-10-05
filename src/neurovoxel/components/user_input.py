@@ -221,7 +221,14 @@ def render_analysis_param_input() -> None:
         key="voxelwise_standardization_input",
     )
 
-    st.subheader("Cluster conversion (for atlasreader output)")
+    st.markdown(
+        """
+        <p style="margin-bottom: -15px;">
+            <strong>Cluster conversion (for atlasreader output)</strong>
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
 
     def voxels_to_mm3() -> None:
         voxel_volume = st.session_state.analysis["voxel_size"] ** 3
