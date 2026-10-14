@@ -125,14 +125,14 @@ def main(
         # left/right UI setup
         col1, col2 = st.columns(2)
         with col2:
-                    render_template_input("Brain template image", "template", autoload)
-                    valid_mask = render_template_input(
-                        "Binary brain mask specifying voxels to analyze",
-                        "mask",
-                        autoload,
-                    )
-                    with st.expander("Advanced"):
-                        render_analysis_param_input()
+            render_template_input("Brain template image", "template", autoload)
+            valid_mask = render_template_input(
+                "Binary brain mask specifying voxels to analyze",
+                "mask",
+                autoload,
+            )
+            with st.expander("Advanced"):
+                render_analysis_param_input()
         with col1:
             valid_bids = render_bids_input(autoload)
 
