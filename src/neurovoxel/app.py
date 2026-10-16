@@ -6,7 +6,9 @@ import argparse
 from pathlib import Path
 
 import streamlit as st
-from atlasreader import create_output
+from atlasreader import (
+    create_output,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from neurovoxel.components.data import render_entity_table
 from neurovoxel.components.footer import render_footer
