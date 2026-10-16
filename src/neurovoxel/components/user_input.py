@@ -221,6 +221,14 @@ def render_analysis_param_input() -> None:
         ),
         key="voxelwise_standardization_input",
     )
+    st.session_state["cluster size"] = st.number_input(
+        "Cluster size for atlasreader output",
+        min_value=0,
+        max_value=20,
+        value=st.session_state.get("analysis", {}).get("cluster_size", 10),
+        step=1,
+        key="cluster_size_input",
+    )
 
 
 def render_outputdir_input(autoload: bool = False) -> bool:
@@ -297,6 +305,7 @@ def parameter_output(  # noqa: PLR0913
     commit: str,
     statistical_maps: list[str],
     tabular_summary: str,
+    atlasreader_output: list[str],
     packages: dict[str, str],
 ) -> dict[
     str,
@@ -314,5 +323,6 @@ def parameter_output(  # noqa: PLR0913
         "commit": commit,
         "statistical maps in output folder": statistical_maps,
         "tabular summary in output folder": tabular_summary,
+        "atlasreader output in output folder": atlasreader_output,
         "packages": packages,
     }
