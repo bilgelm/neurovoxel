@@ -88,7 +88,6 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
         )
 
         if st.session_state.space_verification_input:
-
             atlasreader_output_path: Path = outpath / "atlasreader_output"
             atlasreader_output_path.mkdir(exist_ok=True)
             create_output(
@@ -97,7 +96,8 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
                 outdir=atlasreader_output_path,
             )
             atlasreader_output = [
-                file_path.name for file_path in atlasreader_output_path.glob("*")
+                file_path.name
+                for file_path in atlasreader_output_path.glob("*")
             ]
 
         else:
