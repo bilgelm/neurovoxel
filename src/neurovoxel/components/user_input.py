@@ -222,7 +222,7 @@ def render_analysis_param_input() -> None:
         key="voxelwise_standardization_input",
     )
     space_verification = st.checkbox(
-        "Run Atlasreader (images must be in MNI152 to work))",
+        "Run Atlasreader? (Images must be in MNI152 space.)",
         value=st.session_state.get("space_verification", False),
         key="space_verification_input",
     )
