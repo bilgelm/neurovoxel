@@ -86,16 +86,23 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             st.session_state.masker,
             lhs,
         )
-        atlasreader_output_path: Path = outpath / "atlasreader_output"
-        atlasreader_output_path.mkdir(exist_ok=True)
-        create_output(
-            outpath / statistical_maps[1],
-            cluster_extent=st.session_state.get("cluster size", 10),
-            outdir=atlasreader_output_path,
-        )
-        atlasreader_output = [
-            file_path.name for file_path in atlasreader_output_path.glob("*")
-        ]
+
+        if st.session_state.space_verification_input:
+
+            atlasreader_output_path: Path = outpath / "atlasreader_output"
+            atlasreader_output_path.mkdir(exist_ok=True)
+            create_output(
+                outpath / statistical_maps[1],
+                cluster_extent=st.session_state.get("cluster size", 10),
+                outdir=atlasreader_output_path,
+            )
+            atlasreader_output = [
+                file_path.name for file_path in atlasreader_output_path.glob("*")
+            ]
+
+        else:
+            atlasreader_output = None
+
         st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
         output_parameters = parameter_output(
             st.session_state.paths,
