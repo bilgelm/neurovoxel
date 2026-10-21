@@ -124,6 +124,15 @@ def main(
     with st.container():
         # left/right UI setup
         col1, col2 = st.columns(2)
+        with col2:
+            render_template_input("Brain template image", "template", autoload)
+            valid_mask = render_template_input(
+                "Binary brain mask specifying voxels to analyze",
+                "mask",
+                autoload,
+            )
+            with st.expander("Advanced"):
+                render_analysis_param_input()
         with col1:
             valid_bids = render_bids_input(autoload)
 
@@ -140,15 +149,6 @@ def main(
 
             render_table_input(autoload)
             valid_outputdir = render_outputdir_input(autoload)
-        with col2:
-            render_template_input("Brain template image", "template", autoload)
-            valid_mask = render_template_input(
-                "Binary brain mask specifying voxels to analyze",
-                "mask",
-                autoload,
-            )
-            with st.expander("Advanced"):
-                render_analysis_param_input()
 
     if "entity_df" in st.session_state:
         # Render editable table; save any user edits to session state
