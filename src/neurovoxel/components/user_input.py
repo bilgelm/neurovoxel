@@ -1,5 +1,6 @@
 """Parse and validate user text inputs."""
 
+from math import ceil
 from pathlib import Path
 from typing import Literal
 
@@ -219,38 +220,31 @@ def render_analysis_param_input() -> None:
         key="voxelwise_standardization_input",
     )
     space_verification = st.checkbox(
-        "Run Atlasreader? (Images must be in MNI152 space.)",
+        "Run AtlasReader? (Images must be in MNI152 space.)",
         value=st.session_state.get("space_verification", False),
         key="space_verification_input",
     )
 
     if space_verification:
-        st.markdown(
-            """
-            <p style="margin-bottom: -15px;">
-                <strong>Cluster conversion (for atlasreader output)</strong>
-            </p>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown("Minimum cluster size for AtlasReader reporting")
 
         def voxels_to_mm3() -> None:
             voxel_volume = st.session_state.analysis["voxel_size"] ** 3
-            st.session_state["cluster_volume_mm3"] = (
+            st.session_state["cluster_size_mm3"] = (
                 st.session_state["cluster_size_voxels"] * voxel_volume
             )
 
         def mm3_to_voxels() -> None:
             voxel_volume = st.session_state.analysis["voxel_size"] ** 3
-            st.session_state["cluster_size_voxels"] = round(
-                st.session_state["cluster_volume_mm3"] / voxel_volume
+            st.session_state["cluster_size_voxels"] = ceil(
+                st.session_state["cluster_size_mm3"] / voxel_volume
             )
 
         subcol1, subcol2 = st.columns(2)
 
         with subcol1:
-            st.session_state["cluster size"] = st.number_input(
-                "Voxel amount",
+            st.session_state["cluster_size"] = st.number_input(
+                "Voxels",
                 min_value=0,
                 step=1,
                 key="cluster_size_voxels",
@@ -259,10 +253,10 @@ def render_analysis_param_input() -> None:
 
         with subcol2:
             st.number_input(
-                "Cluster volume (mm³)",
+                "mm³",
                 min_value=0.0,
                 step=1.0,
-                key="cluster_volume_mm3",
+                key="cluster_size_mm3",
                 on_change=mm3_to_voxels,
             )
 
