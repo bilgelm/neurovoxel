@@ -1,5 +1,6 @@
 """Parse and validate user text inputs."""
 
+from math import ceil
 from pathlib import Path
 from typing import Literal
 
@@ -38,31 +39,8 @@ def render_bids_input(autoload: bool = False) -> bool:
     else:
         st.write("❗️ No BIDS root directory selected.")
 
-    # Input for cache datasets
-    bids_cache_box = st.empty()
-    bids_cache = bids_cache_box.text_input(
-        "Optional: BIDS parquet cache file",
-        value=st.session_state.paths.get("bids_cache"),
-        key="bids_cache_input",
-    )
-
-    if bids_cache:
-        st.session_state.paths["bids_cache"] = bids_cache
-    else:
-        st.session_state.paths.pop("bids_cache", None)
-
-    bids_cache_path: Path | None = None
-    if st.session_state.get("paths", {}).get("bids_cache"):
-        bids_cache_path = Path(
-            st.session_state.get("paths", {}).get("bids_cache")
-        )
-        if not bids_cache_path.is_file():
-            valid_bids = False
-            st.error(f"File does not exist: {bids_cache_path}")
-
     if autoload and valid_bids:
         bids_root_box.empty()
-        bids_cache_box.empty()
 
     return valid_bids
 
@@ -148,6 +126,26 @@ def render_table_input(autoload: bool = False) -> bool:
 
 def render_analysis_param_input() -> None:
     """Input for analysis parameters."""
+    st.session_state.setdefault(
+        "bids_cache_input", st.session_state.paths.get("bids_cache") or ""
+    )
+    bids_cache = st.text_input(
+        "Optional: BIDS parquet cache file",
+        key="bids_cache_input",
+    ).strip()
+
+    # Only an existing file is kept in session state, so only a valid path
+    # is passed to load_bids and saved to parameters.json.
+    if bids_cache and Path(bids_cache).is_file():
+        st.session_state.paths["bids_cache"] = bids_cache
+    else:
+        st.session_state.paths.pop("bids_cache", None)
+        if bids_cache:
+            st.warning(
+                f"Parquet cache file not found, it will not be used: "
+                f"{bids_cache}"
+            )
+
     st.session_state.analysis["smoothing_fwhm"] = st.number_input(
         "Smoothing FWHM (mm) for isotropic Gaussian",
         min_value=0.0,
@@ -222,20 +220,45 @@ def render_analysis_param_input() -> None:
         key="voxelwise_standardization_input",
     )
     space_verification = st.checkbox(
-        "Run Atlasreader? (Images must be in MNI152 space.)",
+        "Run AtlasReader? (Images must be in MNI152 space.)",
         value=st.session_state.get("space_verification", False),
         key="space_verification_input",
     )
 
     if space_verification:
-        st.session_state["cluster size"] = st.number_input(
-            "Cluster size (voxels)",
-            min_value=0,
-            max_value=100,
-            value=st.session_state.get("analysis", {}).get("cluster_size", 10),
-            step=1,
-            key="cluster_size_input",
-        )
+        st.markdown("Minimum cluster size for AtlasReader reporting")
+
+        def voxels_to_mm3() -> None:
+            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            st.session_state["cluster_size_mm3"] = (
+                st.session_state["cluster_size_voxels"] * voxel_volume
+            )
+
+        def mm3_to_voxels() -> None:
+            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            st.session_state["cluster_size_voxels"] = ceil(
+                st.session_state["cluster_size_mm3"] / voxel_volume
+            )
+
+        subcol1, subcol2 = st.columns(2)
+
+        with subcol1:
+            st.session_state["cluster_size"] = st.number_input(
+                "Voxels",
+                min_value=0,
+                step=1,
+                key="cluster_size_voxels",
+                on_change=voxels_to_mm3,
+            )
+
+        with subcol2:
+            st.number_input(
+                "mm³",
+                min_value=0.0,
+                step=1.0,
+                key="cluster_size_mm3",
+                on_change=mm3_to_voxels,
+            )
 
 
 def render_outputdir_input(autoload: bool = False) -> bool:
