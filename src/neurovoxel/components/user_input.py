@@ -243,7 +243,7 @@ def render_analysis_param_input() -> None:
         subcol1, subcol2 = st.columns(2)
 
         with subcol1:
-            st.session_state["cluster_size"] = st.number_input(
+            st.session_state.analysis["cluster_size"] = st.number_input(
                 "Voxels",
                 min_value=0,
                 step=1,

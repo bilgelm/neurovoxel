@@ -94,7 +94,7 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             atlasreader_output_path.mkdir(exist_ok=True)
             create_output(
                 outpath / statistical_maps[1],
-                cluster_extent=st.session_state.get("cluster_size"),
+                cluster_extent=st.session_state.analysis.get("cluster_size"),
                 outdir=atlasreader_output_path,
             )
             atlasreader_output = [
@@ -112,7 +112,6 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             statistical_maps,
             "tbl.csv",
             atlasreader_output,
-            st.session_state.get("cluster_size"),
         )
         save_parameters(outpath / "parameters.json", output_parameters)
 

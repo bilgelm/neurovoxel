@@ -25,13 +25,12 @@ def save_parameters(
         json.dump(data, f, indent=4)
 
 
-def parameter_output(  # noqa: PLR0913
+def parameter_output(
     paths: dict[str, str],
     analysis: dict[str, str | float | int | bool | None],
     statistical_maps: list[str],
     tabular_summary: str,
     atlasreader_output: list[str] | None,
-    cluster_size: int | None,
 ) -> dict[
     str,
     dict[str, str]
@@ -52,5 +51,4 @@ def parameter_output(  # noqa: PLR0913
         "tabular summary in output folder": tabular_summary,
         "atlasreader output in output folder": atlasreader_output,
         "packages": packages,
-        "atlasreadercluster size": cluster_size,
     }
