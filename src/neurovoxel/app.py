@@ -15,7 +15,6 @@ from neurovoxel.components.footer import render_footer
 from neurovoxel.components.header import render_header
 from neurovoxel.components.model_runner import render_model_runner
 from neurovoxel.components.user_input import (
-    parameter_output,
     render_analysis_param_input,
     render_bids_input,
     render_inference_choices,
@@ -30,8 +29,11 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
-from neurovoxel.utils.output import VERSION, commit, packages, timestamp
-from neurovoxel.utils.viz import save_all_maps, save_parameters
+from neurovoxel.utils.output import (
+    parameter_output,
+    save_parameters,
+)
+from neurovoxel.utils.viz import save_all_maps
 
 
 def _load_dataset() -> None:
@@ -107,13 +109,10 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
         output_parameters = parameter_output(
             st.session_state.paths,
             analysis,
-            VERSION,
-            timestamp,
-            commit,
             statistical_maps,
             "tbl.csv",
             atlasreader_output,
-            packages,
+            st.session_state.get("cluster_size"),
         )
         save_parameters(outpath / "parameters.json", output_parameters)
 
