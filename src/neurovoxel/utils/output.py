@@ -15,6 +15,7 @@ timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()  # noqa: S607
 packages = {dist.metadata["Name"]: dist.version for dist in distributions()}
 
+
 def save_parameters(
     filename: Path,
     data: dict[str, Any],
@@ -22,6 +23,7 @@ def save_parameters(
     """Save parameters to a JSON file."""
     with filename.open("w") as f:
         json.dump(data, f, indent=4)
+
 
 def parameter_output(  # noqa: PLR0913
     paths: dict[str, str],

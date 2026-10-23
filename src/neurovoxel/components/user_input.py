@@ -325,4 +325,3 @@ def render_inference_choices(rhs: pd.Index) -> None:
             if cbox:
                 inference_terms.add(indep_var)
     st.session_state.analysis["inference_terms"] = inference_terms
-
