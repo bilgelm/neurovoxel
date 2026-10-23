@@ -243,7 +243,7 @@ def render_analysis_param_input() -> None:
         subcol1, subcol2 = st.columns(2)
 
         with subcol1:
-            st.session_state["cluster_size"] = st.number_input(
+            st.session_state.analysis["cluster_size"] = st.number_input(
                 "Voxels",
                 min_value=0,
                 step=1,
@@ -325,35 +325,3 @@ def render_inference_choices(rhs: pd.Index) -> None:
             if cbox:
                 inference_terms.add(indep_var)
     st.session_state.analysis["inference_terms"] = inference_terms
-
-
-def parameter_output(  # noqa: PLR0913
-    paths: dict[str, str],
-    analysis: dict[str, str | float | int | bool | None],
-    version: str,
-    timestamp: str,
-    commit: str,
-    statistical_maps: list[str],
-    tabular_summary: str,
-    atlasreader_output: list[str] | None,
-    packages: dict[str, str],
-) -> dict[
-    str,
-    dict[str, str]
-    | dict[str, str | float | int | bool | None]
-    | str
-    | list[str]
-    | None,
-]:
-    """Return a dictionary of parameters for saving."""
-    return {
-        "paths": paths,
-        "analysis": analysis,
-        "version": version,
-        "timestamp (UTC)": timestamp,
-        "commit": commit,
-        "statistical maps in output folder": statistical_maps,
-        "tabular summary in output folder": tabular_summary,
-        "atlasreader output in output folder": atlasreader_output,
-        "packages": packages,
-    }
