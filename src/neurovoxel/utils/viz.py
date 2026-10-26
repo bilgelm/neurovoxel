@@ -2,7 +2,6 @@
 
 # pyright: reportArgumentType=false, reportMissingTypeStubs=false, reportReturnType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownVariableType=false
 
-import json
 from pathlib import Path
 from re import sub
 from typing import Any, Literal, get_args
@@ -153,15 +152,6 @@ def save_stat_map(
 ) -> None:
     """Save stat map."""
     nib_save(unmask(result[stat][idx, :], masker), filename)
-
-
-def save_parameters(
-    filename: Path,
-    data: dict[str, Any],
-) -> None:
-    """Save parameters to a JSON file."""
-    with filename.open("w") as f:
-        json.dump(data, f)
 
 
 def save_all_maps(
