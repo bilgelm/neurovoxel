@@ -5,7 +5,6 @@ configuration loading, BIDS layout loading, and query parsing.
 """
 
 import json
-import os
 import secrets
 from collections.abc import Iterator
 from pathlib import Path
@@ -69,6 +68,7 @@ def test_load_config_invalid(
 
 
 # Test for load_bids
+
 
 @pytest.fixture(scope="module")
 def bids() -> Iterator[SimpleNamespace]:
