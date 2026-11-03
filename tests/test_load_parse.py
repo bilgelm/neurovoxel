@@ -82,7 +82,7 @@ def bids() -> Iterator[SimpleNamespace]:
             dataset="ds007401",
             tag=tag,
             target_dir=root,
-            include=["sub-3"],
+            include=["sub-3", "sub-4", "sub-32", "sub-33", "sub-34"],
         )
 
         yield SimpleNamespace(
