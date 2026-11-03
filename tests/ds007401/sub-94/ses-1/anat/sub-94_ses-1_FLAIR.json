@@ -1,0 +1,26 @@
+{
+  "AcquisitionMatrixPE": 224,
+  "ColString": null,
+  "Dimensions": [
+    256,
+    256,
+    30
+  ],
+  "FlipAngle": 90,
+  "InversionTime": 2.25,
+  "ManufacturersModelName": "SIGNA EXCITE",
+  "PercentPhaseFOV": 100,
+  "PixelBandwidth": 244.141,
+  "ReconMatrixPE": 256,
+  "SequenceVariant": "NONE",
+  "SliceThickness": 5,
+  "VoxelSizes": [
+    0.9375,
+    0.937515,
+    5
+  ],
+  "Modality": "MR",
+  "MagneticFieldStrength": 3,
+  "Hospital": "UCLH",
+  "exam_type": "imaging"
+}

@@ -1,0 +1,25 @@
+{
+  "AcquisitionMatrixPE": 96,
+  "ColString": null,
+  "Dimensions": [
+    128,
+    128,
+    60
+  ],
+  "FlipAngle": 90,
+  "ManufacturersModelName": "SIGNA HDx",
+  "PercentPhaseFOV": 100,
+  "PixelBandwidth": 3906.25,
+  "ReconMatrixPE": 128,
+  "SequenceVariant": "NONE",
+  "SliceThickness": 2.4,
+  "VoxelSizes": [
+    1.8750000,
+    1.8750000,
+    2.4000001
+  ],
+  "Modality": "MR",
+  "MagneticFieldStrength": 3,
+  "Hospital": "UCLH",
+  "exam_type": "imaging"
+}
