@@ -5,10 +5,14 @@ configuration loading, BIDS layout loading, and query parsing.
 """
 
 import json
+import os
 import secrets
+from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
+import openneuro
 import pandas as pd
 import pytest
 from bids2table.pybids import (  # pyright: ignore[reportMissingTypeStubs]
@@ -66,15 +70,25 @@ def test_load_config_invalid(
 
 # Test for load_bids
 
+@pytest.fixture(scope="module")
+def bids() -> Iterator[SimpleNamespace]:
+    """Download BIDS test data and delete it after this module's tests."""
+    tag = "1.0.0"
 
-@pytest.fixture
-def bids() -> SimpleNamespace:
-    """Return a valid BIDS dataset."""
-    root = Path(__file__).parent / "ds007401"
-    return SimpleNamespace(
-        path=root,
-        parquet_path=root / "ds007401" / "ds007401.parquet",
-    )
+    with TemporaryDirectory(prefix="neurovoxel-test-") as directory:
+        root = Path(directory) / "ds007401"
+
+        openneuro.download(
+            dataset="ds007401",
+            tag=tag,
+            target_dir=root,
+            include=["sub-3"],
+        )
+
+        yield SimpleNamespace(
+            path=root,
+            parquet_path=Path(directory) / "ds007401.parquet",
+        )
 
 
 def test_load_bids(bids: SimpleNamespace) -> None:
