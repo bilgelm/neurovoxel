@@ -120,16 +120,14 @@ def test_parse_query_invalid_rhs(tabular: pd.DataFrame) -> None:
             "T1w ~ invalid_column", ["T1w", "FLAIR", "dwi"], tabular
         )
 
+
 def test_parse_query_invalid_lhs(tabular: pd.DataFrame) -> None:
     """Test parsing a query: invalid case."""
     with pytest.raises(ValueError, match="is invalid"):
-        mod.parse_query(
-            "invalid ~ age", ["T1w", "FLAIR", "dwi"], tabular
-        )
+        mod.parse_query("invalid ~ age", ["T1w", "FLAIR", "dwi"], tabular)
+
 
 def test_parse_query_no_tilda(tabular: pd.DataFrame) -> None:
     """Test parsing a query: invalid case."""
     with pytest.raises(ValueError, match="Invalid formula syntax"):
-        mod.parse_query(
-            "invalid age", ["T1w", "FLAIR", "dwi"], tabular
-        )
+        mod.parse_query("invalid age", ["T1w", "FLAIR", "dwi"], tabular)

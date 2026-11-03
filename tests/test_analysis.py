@@ -158,7 +158,7 @@ def test_run_query_aligns_rows_and_selects_inference_term(
                 "Intercept": 1.0,
                 "age": np.asarray(tbl["age"], dtype=np.float64),
             }
-    )
+        )
 
     monkeypatch.setattr(mod, "model_matrix", fake_model_matrix)
     monkeypatch.setattr(mod, "OLSModel", FakeOLSModel)
@@ -285,9 +285,7 @@ def test_run_query_selects_session(  # noqa: C901 # still don't fully understand
     monkeypatch.setattr(mod, "Formula", _fake_formula)
 
     def _mock_model_matrix(
-        _rhs: object,
-        data: pd.DataFrame,
-        **kwargs: object
+        _rhs: object, data: pd.DataFrame, **kwargs: object
     ) -> pd.DataFrame:
         assert kwargs["na_action"] == "ignore"
         return pd.DataFrame(
@@ -391,11 +389,13 @@ def test_run_query_too_few_observations(
         )
 
 
+@pytest.mark.parametrize("standardization", ["center", "scale"])
 def test_run_query_beta_and_t_values(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    standardization: str,
 ) -> None:
-    """Ensure beta and t-statistic maps are computed from the model fit."""
+    """Verify beta and t-statistic maps for centered and scaled image data."""
     age = np.array([10.0, 20.0, 30.0, 40.0])
 
     tbl = pd.DataFrame(
@@ -412,21 +412,30 @@ def test_run_query_beta_and_t_values(
             self.path = f"sub-{subject}.nii.gz"
 
         def get_entities(self) -> dict[str, str]:
-            return {
-                "sub": self.subject,
-                "ses": "1",
-            }
+            return {"sub": self.subject, "ses": "1"}
 
     images = [FakeImage(subject) for subject in tbl["subject"]]
 
-    # Add fixed noise so the relationship isn't perfectly linear.
     noise = np.array([1.0, -2.0, 1.0, 0.0])
-
     y = 5.0 + 2.0 * age + noise
 
+    # Independently compute the reference OLS slope and t-statistic.
+    design = np.column_stack([np.ones_like(age), age])
+    coefficients, *_ = np.linalg.lstsq(design, y, rcond=None)
+    residuals = y - design @ coefficients
+    degrees_of_freedom = len(y) - design.shape[1]
+    residual_variance = (residuals @ residuals) / degrees_of_freedom
+    slope_variance = residual_variance * np.linalg.inv(design.T @ design)[1, 1]
+    expected_t = coefficients[1] / np.sqrt(slope_variance)
+
+    expected_beta = coefficients[1]
+    if standardization == "scale":
+        expected_beta /= np.std(y)
+
     class FakeMasker:
-        def fit_transform(self, _paths: list[str]) -> np.ndarray:
-            return y[:, None]
+        def fit_transform(self, _paths: object) -> np.ndarray:
+            """Return a fresh image-data array for each call."""
+            return y[:, None].copy()
 
     monkeypatch.setattr(mod, "MIN_N_OBS", 4)
 
@@ -441,30 +450,24 @@ def test_run_query_beta_and_t_values(
         n_jobs=1,
         random_state=42,
         tfce=False,
+        voxelwise_standardization=standardization,
     )
 
-    # -------------------------
-    # Check beta map
-    # -------------------------
-
     assert "beta" in result
-
     np.testing.assert_allclose(
         result["beta"],
-        [[1.99]],
+        [[expected_beta]],
         rtol=1e-5,
         atol=1e-5,
     )
 
-    # -------------------------
-    # Check t-statistic map
-    # -------------------------
-
     assert "t" in result
-
-    assert result["t"].shape == (1, 1)
-
-    assert np.isfinite(result["t"]).all()
+    np.testing.assert_allclose(
+        result["t"],
+        [[expected_t]],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 ###############################

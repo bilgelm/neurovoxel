@@ -63,10 +63,18 @@ def test_render_model_runner(
     state = FakeSessionState(
         entity_df=pd.DataFrame(
             [
-                {"name": "wm", "suffix": "probseg", "label": "WM",
-                 "task": "rest"},
-                {"name": "gm", "suffix": "probseg", "label": "GM",
-                 "task": None},
+                {
+                    "name": "wm",
+                    "suffix": "probseg",
+                    "label": "WM",
+                    "task": "rest",
+                },
+                {
+                    "name": "gm",
+                    "suffix": "probseg",
+                    "label": "GM",
+                    "task": None,
+                },
             ]
         ),
         layout=layout,

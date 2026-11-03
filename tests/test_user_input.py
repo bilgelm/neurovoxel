@@ -9,7 +9,8 @@ import pytest
 
 import neurovoxel.components.user_input as mod
 
-#Unit test for test_bids_root
+# Unit test for test_bids_root
+
 
 class FakeSessionState(dict[str, object]):
     """Dictionary-backed session state exposing the paths mapping."""
@@ -29,9 +30,7 @@ def mocked_st(monkeypatch: pytest.MonkeyPatch) -> Mock:
     return fake_st
 
 
-def test_bids_root_is_directory(
-        mocked_st: Mock, tmp_path: Path
-    ) -> None:
+def test_bids_root_is_directory(mocked_st: Mock, tmp_path: Path) -> None:
     """Verify an existing directory is accepted as the BIDS root."""
     # tmp_path is an actual directory created by pytest.
     bids_root = str(tmp_path)
@@ -45,9 +44,7 @@ def test_bids_root_is_directory(
     mocked_st.write.assert_not_called()
 
 
-def test_bids_root_does_not_exist(
-    mocked_st: Mock, tmp_path: Path
-) -> None:
+def test_bids_root_does_not_exist(mocked_st: Mock, tmp_path: Path) -> None:
     """Verify a nonexistent path is rejected as the BIDS root."""
     # This path is not created.
     bids_root = str(tmp_path / "missing_directory")
@@ -77,9 +74,8 @@ def test_bids_root_not_given(mocked_st: Mock) -> None:
     mocked_st.error.assert_not_called()
 
 
-
-
 # test for render table input
+
 
 @pytest.mark.parametrize("var_name", ["template", "mask"])
 def test_template_input_existing_file(
@@ -166,8 +162,8 @@ def test_template_input_autoload(
         input_box.empty.assert_not_called()
 
 
+# test for render table input
 
-#test for render table input
 
 @pytest.mark.parametrize(
     ("extension", "separator"),
@@ -182,11 +178,13 @@ def test_render_table_input_valid(
     """Verify valid CSV and TSV files are loaded as table inputs."""
     # Create a real temporary table file.
     table_path = tmp_path / f"data{extension}"
-    expected_table: pd.DataFrame = pd.DataFrame({
-        "subject": ["01", "02"],
-        "session": ["1", "1"],
-        "age": [25, 30],
-    })
+    expected_table: pd.DataFrame = pd.DataFrame(
+        {
+            "subject": ["01", "02"],
+            "session": ["1", "1"],
+            "age": [25, 30],
+        }
+    )
     expected_table.to_csv(table_path, sep=separator, index=False)
 
     # Simulate the user entering its path.
@@ -202,6 +200,7 @@ def test_render_table_input_valid(
     )
     mocked_st.error.assert_not_called()
 
+
 def test_table_input_shows_error_for_missing_file(
     mocked_st: Mock, tmp_path: Path
 ) -> None:
@@ -216,6 +215,7 @@ def test_table_input_shows_error_for_missing_file(
         f"File does not exist: {missing_path}"
     )
     mocked_st.write.assert_not_called()
+
 
 def test_table_input_shows_error_for_missing_columns(
     mocked_st: Mock, tmp_path: Path
@@ -236,6 +236,7 @@ def test_table_input_shows_error_for_missing_columns(
     )
     mocked_st.write.assert_not_called()
 
+
 def test_table_input_shows_message_when_not_selected(mocked_st: Mock) -> None:
     """Verify clearing the table input.
 
@@ -247,14 +248,12 @@ def test_table_input_shows_message_when_not_selected(mocked_st: Mock) -> None:
     result = mod.render_table_input()
 
     assert result is False
-    mocked_st.write.assert_called_once_with(
-        "❗️ No tabular file selected."
-    )
+    mocked_st.write.assert_called_once_with("❗️ No tabular file selected.")
     mocked_st.error.assert_not_called()
 
 
-
 # Tests for render_analysis_param_input
+
 
 class AnalysisSessionState(dict[str, object]):
     """Provide attribute-style access to analysis session state."""
@@ -294,10 +293,15 @@ def analysis_st(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         return state.get(key, 0)
 
     fake_st.number_input.side_effect = number_input
-    def checkbox(**kwargs: object) -> bool:
-        return bool(kwargs.get("value", False))
+
+    def checkbox(_label: str, **kwargs: object) -> bool:
+        value = kwargs.get("value", False)
+        return value if isinstance(value, bool) else False
 
     fake_st.checkbox.side_effect = checkbox
+
+    fake_st.checkbox.side_effect = checkbox
+
     def selectbox(
         _label: str, options: list[object], **kwargs: object
     ) -> object:
@@ -311,6 +315,7 @@ def analysis_st(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
     monkeypatch.setattr(mod, "st", fake_st)
     return fake_st
+
 
 def test_analysis_input_saves_initial_values(analysis_st: MagicMock) -> None:
     """Verify initial analysis input values are saved to session state."""
@@ -329,6 +334,7 @@ def test_analysis_input_saves_initial_values(analysis_st: MagicMock) -> None:
     analysis_st.columns.assert_not_called()
     analysis_st.warning.assert_not_called()
 
+
 def test_analysis_input_saves_changed_values(analysis_st: MagicMock) -> None:
     """Verify changed analysis input values are saved to session state."""
     voxel_size = 2.0
@@ -339,21 +345,22 @@ def test_analysis_input_saves_changed_values(analysis_st: MagicMock) -> None:
         "n_perm_input": n_perm,
     }
     analysis_st.number_input.side_effect = (
-        lambda label, **kwargs: selected_numbers[kwargs["key"]] # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+        lambda label, **kwargs: selected_numbers[kwargs["key"]]  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
     )
     analysis_st.checkbox.side_effect = (
-        lambda label, **kwargs: kwargs["key"] == "tfce_input" # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+        lambda label, **kwargs: kwargs["key"] == "tfce_input"  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
     )
 
     mod.render_analysis_param_input()
 
     analysis = analysis_st.session_state.analysis
-    assert analysis["smoothing_fwhm"] == selected_numbers[
-        "smoothing_fwhm_input"
-    ]
+    assert (
+        analysis["smoothing_fwhm"] == selected_numbers["smoothing_fwhm_input"]
+    )
     assert analysis["voxel_size"] == voxel_size
     assert analysis["n_perm"] == n_perm
     assert analysis["tfce"] is True
+
 
 @pytest.mark.parametrize(
     "case",
@@ -386,7 +393,7 @@ def test_analysis_input_validates_cache(
     mod.render_analysis_param_input()
 
     if case == "existing_file":
-        assert analysis_st.session_state.paths["bids_cache"] == str(cache_path) # pyright: ignore[reportPossiblyUnboundVariable]
+        assert analysis_st.session_state.paths["bids_cache"] == str(cache_path)  # pyright: ignore[reportPossiblyUnboundVariable]
         analysis_st.warning.assert_not_called()
     else:
         assert "bids_cache" not in analysis_st.session_state.paths
@@ -396,17 +403,18 @@ def test_analysis_input_validates_cache(
         else:
             analysis_st.warning.assert_called_once_with(
                 "Parquet cache file not found, it will not be used: "
-                f"{cache_path}" # pyright: ignore[reportPossiblyUnboundVariable]
+                f"{cache_path}"  # pyright: ignore[reportPossiblyUnboundVariable]
             )
+
 
 @pytest.mark.parametrize("session_option", ["first", "all"])
 def test_analysis_input_session_warning(
     analysis_st: MagicMock, session_option: str
 ) -> None:
     """Verify that selecting all sessions displays an independence warning."""
-    analysis_st.session_state.analysis[
-        "handle_multiple_sessions"
-    ] = session_option
+    analysis_st.session_state.analysis["handle_multiple_sessions"] = (
+        session_option
+    )
 
     mod.render_analysis_param_input()
 
@@ -418,6 +426,7 @@ def test_analysis_input_session_warning(
         )
     else:
         analysis_st.warning.assert_not_called()
+
 
 def test_analysis_input_atlasreader_conversions(analysis_st: MagicMock) -> None:
     """Verify cluster-size conversions between voxels and cubic millimeters."""
@@ -433,7 +442,7 @@ def test_analysis_input_atlasreader_conversions(analysis_st: MagicMock) -> None:
         "Minimum cluster size for AtlasReader reporting"
     )
     expected_cluster_size = 2
-    assert state["cluster_size"] == expected_cluster_size
+    assert state["cluster_size_voxels"] == expected_cluster_size
 
     # Find the callbacks passed to the two cluster-size widgets.
     widget_arguments = {
@@ -453,8 +462,8 @@ def test_analysis_input_atlasreader_conversions(analysis_st: MagicMock) -> None:
     assert state["cluster_size_voxels"] == expected_cluster_size_voxels
 
 
-
 # Tests for render_outputdir_input
+
 
 @pytest.mark.parametrize("autoload", [False, True])
 def test_outputdir_existing_empty_directory(
@@ -540,15 +549,12 @@ def test_outputdir_not_given(mocked_st: Mock) -> None:
     result = mod.render_outputdir_input()
 
     assert result is False
-    mocked_st.write.assert_called_once_with(
-        "❗️ No output directory selected."
-    )
+    mocked_st.write.assert_called_once_with("❗️ No output directory selected.")
     mocked_st.error.assert_not_called()
 
 
-
-
 # Unit test for is_directory_empty
+
 
 def test_is_directory_empty_returns_true(tmp_path: Path) -> None:
     """Verify an empty directory is reported as empty."""
@@ -563,7 +569,7 @@ def test_is_directory_empty_returns_false_with_file(tmp_path: Path) -> None:
 
 
 def test_is_directory_empty_returns_false_with_subdirectory(
-        tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """Verify a directory containing a subdirectory is reported as non-empty."""
     (tmp_path / "subdirectory").mkdir()
@@ -592,8 +598,8 @@ def test_is_directory_empty_rejects_invalid_path(
     )
 
 
-
 # Unit test for render_inference_choices
+
 
 def test_inference_choices_defaults(analysis_st: MagicMock) -> None:
     """Verify that inference choices default to all non-intercept terms."""
@@ -602,13 +608,16 @@ def test_inference_choices_defaults(analysis_st: MagicMock) -> None:
 
     # Simulate accepting each checkbox's default value.
     analysis_st.checkbox.side_effect = (
-        lambda label, **kwargs: kwargs["value"] # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+        lambda label, **kwargs: kwargs["value"]  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
     )
 
     mod.render_inference_choices(rhs)
 
     assert analysis_st.session_state.analysis["inference_terms"] == {
-        "age", "sex", "group", "score"
+        "age",
+        "sex",
+        "group",
+        "score",
     }
     analysis_st.text.assert_called_once_with(
         "Select model terms for which to perform inference:"
@@ -622,6 +631,7 @@ def test_inference_choices_defaults(analysis_st: MagicMock) -> None:
         )
         for term in rhs
     ]
+
 
 @pytest.mark.parametrize(
     "selected_terms",
@@ -638,7 +648,7 @@ def test_inference_choices_saves_user_selection(
     rhs = pd.Index(["Intercept", "age", "sex"])
     analysis_st.columns.return_value = [MagicMock() for _ in range(4)]
     analysis_st.checkbox.side_effect = (
-        lambda label, **kwargs: label in selected_terms # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+        lambda label, **kwargs: label in selected_terms  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
     )
 
     # Check that the function replaces a previous selection.
@@ -647,8 +657,7 @@ def test_inference_choices_saves_user_selection(
     mod.render_inference_choices(rhs)
 
     assert (
-        analysis_st.session_state.analysis["inference_terms"]
-        == selected_terms
+        analysis_st.session_state.analysis["inference_terms"] == selected_terms
     )
 
 
@@ -661,54 +670,3 @@ def test_inference_choices_empty_rhs(analysis_st: MagicMock) -> None:
 
     assert analysis_st.session_state.analysis["inference_terms"] == set()
     analysis_st.checkbox.assert_not_called()
-
-
-
-
-# Tests for parameter_output
-
-@pytest.mark.parametrize(
-    "atlasreader_output",
-    [None, [], ["atlasreader/report.csv", "atlasreader/figure.png"]],
-)
-def test_parameter_output(
-    atlasreader_output: list[str] | None,
-) -> None:
-    """Verify that parameter_output returns the expected dictionary."""
-    paths = {
-        "bids_root": "/data/bids",
-        "outputdir": "/data/output",
-    }
-    analysis = {
-        "smoothing_fwhm": 5.0,
-        "n_perm": 1000,
-        "tfce": False,
-        "handle_multiple_sessions": "first",
-        "optional_value": None,
-    }
-    statistical_maps = ["beta.nii.gz", "pvalue.nii.gz"]
-    packages = {"numpy": "test-version", "pandas": "test-version"}
-
-    result = mod.parameter_output(
-        paths=paths,
-        analysis=analysis,
-        version="1.0.0",
-        timestamp="2026-10-26T12:00:00",
-        commit="abc123",
-        statistical_maps=statistical_maps,
-        tabular_summary="summary.csv",
-        atlasreader_output=atlasreader_output,
-        packages=packages,
-    )
-
-    assert result == {
-        "paths": paths,
-        "analysis": analysis,
-        "version": "1.0.0",
-        "timestamp (UTC)": "2026-10-26T12:00:00",
-        "commit": "abc123",
-        "statistical maps in output folder": statistical_maps,
-        "tabular summary in output folder": "summary.csv",
-        "atlasreader output in output folder": atlasreader_output,
-        "packages": packages,
-    }

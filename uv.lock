@@ -429,8 +429,6 @@ wheels = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "imageio"
 version = "2.38.1"
 source = { registry = "https://pypi.org/simple" }
@@ -444,7 +442,6 @@ wheels = [
 ]
 
 [[package]]
->>>>>>> main
 name = "importlib"
 version = "1.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -845,10 +842,7 @@ name = "neurovoxel"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-<<<<<<< HEAD
-=======
     { name = "atlasreader" },
->>>>>>> main
     { name = "bids2table", extra = ["pybids"] },
     { name = "bidsschematools" },
     { name = "click" },
@@ -875,10 +869,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-<<<<<<< HEAD
-=======
     { name = "atlasreader", specifier = ">=0.3.2" },
->>>>>>> main
     { name = "bids2table", extras = ["pybids"], specifier = ">=2.3.1" },
     { name = "bidsschematools", specifier = ">=1.0.14" },
     { name = "click", specifier = ">=8.2.1" },

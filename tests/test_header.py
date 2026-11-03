@@ -37,8 +37,7 @@ def test_render_header_renders_logo_and_tagline(
     html = [args[0] for args, _ in markdown_calls]
     assert all(isinstance(content, str) for content in html)
     assert "flex-direction:column" in str(html[0])
-    assert (
-        "Statistical Analysis Platform for Neuroimaging Datasets"
-        in str(html[1])
+    assert "Statistical Analysis Platform for Neuroimaging Datasets" in str(
+        html[1]
     )
     assert html[2] == "</div>"
