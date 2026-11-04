@@ -29,6 +29,10 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
+from neurovoxel.utils.model_diagnostics import (
+    generate_ols_results_pdf,
+    generate_r_square_img,
+)
 from neurovoxel.utils.output import (
     parameter_output,
     save_parameters,
@@ -180,6 +184,18 @@ def main(
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
         _save_analysis_results(lhs, valid_outputdir)
+        r_square_img = generate_r_square_img(
+            r_square=st.session_state.result["r_square"],
+            masker=st.session_state.masker,
+        )
+        generate_ols_results_pdf(
+            r_square=st.session_state.result["r_square"],
+            masker=st.session_state.masker,
+            r_square_img=r_square_img,
+            bg_img=st.session_state.get("paths", {}).get("template"),
+            output_path=Path(st.session_state.paths["outputdir"])
+                / "ols_results.pdf",
+        )
 
     render_footer()
     if debug:

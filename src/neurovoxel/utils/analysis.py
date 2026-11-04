@@ -45,6 +45,7 @@ class PermutedOLSResult(TypedDict):
     mass: NotRequired[np.typing.NDArray[Any]]
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
+    r_square: np.typing.NDArray[Any]
 
 
 def get_masker(
@@ -190,6 +191,7 @@ def run_query(  # noqa: PLR0913
     ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+    r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
 
     # ------------------------------
     # Run permutation-based inference
@@ -211,6 +213,7 @@ def run_query(  # noqa: PLR0913
 
     # Attach OLS betas explicitly
     res["beta"] = beta_coef[is_inference_term, :]  # pyright: ignore[reportIndexIssue]
+    res["r_square"] = r_square_results  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
