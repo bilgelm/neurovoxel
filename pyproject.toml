@@ -6,13 +6,22 @@ typecheck = "pyright"
 test = "pytest"
 mdlint = "rumdl check . --fix"
 # run all the above
-all = [ {ref="format"}, {ref="lint"}, {ref="typecheck"}, {ref="test"}, {ref="mdlint"} ]
+all = [
+    {ref="format"},
+    {ref="lint"},
+    {ref="typecheck"},
+    {ref="test:cov"},
+    {ref="mdlint"}
+]
 
 # run with `uv run poe app`
 app = "streamlit run src/neurovoxel/app.py"
 
+"test:cov" = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=html"
+
 "ci:format" = "ruff format --check"  # fail if not formatted
 "ci:lint" = "ruff check"
+"ci:test" = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=xml"
 
 [project]
 name = "NeuroVoxel"
@@ -47,6 +56,7 @@ dev = [
     "poethepoet>=0.32.0",
     "pyright>=1.1.405",
     "pytest>=8.3.4",
+    "pytest-cov>=7.1.0",
     "ruff>=0.12.0",
     "rumdl>=0.0.114",
 ]
@@ -87,3 +97,23 @@ reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules"
+
+[tool.coverage.run]
+branch = true
+source = ["neurovoxel"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+precision = 2
