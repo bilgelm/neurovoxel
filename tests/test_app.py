@@ -1,5 +1,6 @@
 """Test streamlit app."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, sentinel
 
@@ -9,9 +10,45 @@ from streamlit.testing.v1 import AppTest
 import neurovoxel.app as mod
 
 
-def test_app_runs() -> None:
+def test_app_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test if streamlit app runs."""
-    AppTest.from_file("src/neurovoxel/app.py").run(timeout=30)
+    # AppTest inherits pytest's argv; supply the app's arguments explicitly.
+    monkeypatch.setattr(sys, "argv", ["src/neurovoxel/app.py"])
+    app = AppTest.from_file("src/neurovoxel/app.py").run(timeout=30)
+    assert not app.exception
+
+
+def test_app_parses_streamlit_arguments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Honor application flags even when a Streamlit script context exists."""
+    config_file = tmp_path / "config.json"
+    mocked_load_config = Mock(return_value={})
+    mocked_bids_input = Mock(return_value=False)
+    monkeypatch.setattr(
+        "neurovoxel.utils.load_parse.load_config", mocked_load_config
+    )
+    monkeypatch.setattr(
+        "neurovoxel.components.user_input.render_bids_input", mocked_bids_input
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "src/neurovoxel/app.py",
+            "--config-file",
+            str(config_file),
+            "--autoload",
+            "--debug",
+        ],
+    )
+
+    app = AppTest.from_file("src/neurovoxel/app.py").run(timeout=30)
+
+    assert not app.exception
+    mocked_load_config.assert_called_once_with(config_file)
+    mocked_bids_input.assert_called_once_with(True)  # noqa: FBT003
+    assert "Session State" in [expander.label for expander in app.expander]
 
 
 # Test for _load_dataset function

@@ -215,16 +215,9 @@ def _parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
-
-    if get_script_run_ctx() is not None:
-        # Running inside Streamlit (including AppTest) — skip CLI parsing
-        main()
-    else:
-        # Running as a true CLI script
-        args = _parse_args()
-        main(
-            config_file=args.config_file,
-            autoload=args.autoload,
-            debug=args.debug,
-        )
+    args = _parse_args()
+    main(
+        config_file=args.config_file,
+        autoload=args.autoload,
+        debug=args.debug,
+    )
