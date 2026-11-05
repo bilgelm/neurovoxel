@@ -3,25 +3,23 @@
 format = "ruff format"
 lint = "ruff check --fix"
 typecheck = "pyright"
-test = "pytest"
+test = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=html --cov-fail-under=80"
 mdlint = "rumdl check . --fix"
 # run all the above
 all = [
     {ref="format"},
     {ref="lint"},
     {ref="typecheck"},
-    {ref="test:cov"},
+    {ref="test"},
     {ref="mdlint"}
 ]
 
 # run with `uv run poe app`
 app = "streamlit run src/neurovoxel/app.py"
 
-"test:cov" = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=html"
-
 "ci:format" = "ruff format --check"  # fail if not formatted
 "ci:lint" = "ruff check"
-"ci:test" = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=xml"
+"ci:test" = "pytest --cov=neurovoxel --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
 
 [project]
 name = "NeuroVoxel"
