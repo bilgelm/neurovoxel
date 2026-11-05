@@ -5,6 +5,10 @@ build/
 dist/
 wheels/
 *.egg-info
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # VS code files
 .vscode/
