@@ -6,12 +6,10 @@ configuration loading, BIDS layout loading, and query parsing.
 
 import json
 import secrets
-from collections.abc import Iterator
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
-import openneuro
+import numpy as np
 import pandas as pd
 import pytest
 from bids2table.pybids import (  # pyright: ignore[reportMissingTypeStubs]
@@ -21,6 +19,7 @@ from formulaic.errors import (  # pyright: ignore[reportMissingTypeStubs]
     FactorEvaluationError,  # pyright: ignore[reportMissingTypeStubs]
 )
 from jsonschema import ValidationError
+from nibabel.nifti1 import Nifti1Image
 
 import neurovoxel.utils.load_parse as mod
 
@@ -70,31 +69,37 @@ def test_load_config_invalid(
 # Test for load_bids
 
 
-@pytest.fixture(scope="module")
-def bids() -> Iterator[SimpleNamespace]:
-    """Download BIDS test data and delete it after this module's tests."""
-    tag = "1.0.0"
+@pytest.fixture
+def bids(tmp_path: Path) -> SimpleNamespace:
+    """Create a local BIDS dataset with two subjects and two sessions."""
+    root = tmp_path / "bids"
+    root.mkdir()
+    (root / "dataset_description.json").write_text(
+        json.dumps({"Name": "Test dataset", "BIDSVersion": "1.10.0"}),
+        encoding="utf-8",
+    )
+    image = Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), np.eye(4))
+    for subject in ("01", "02"):
+        for session in ("01", "02"):
+            anat = root / f"sub-{subject}" / f"ses-{session}" / "anat"
+            anat.mkdir(parents=True)
+            for suffix, extension in (("T1w", ".nii.gz"), ("FLAIR", ".nii")):
+                image.to_filename(  # pyright: ignore[reportUnknownMemberType]
+                    anat / f"sub-{subject}_ses-{session}_{suffix}{extension}"
+                )
 
-    with TemporaryDirectory(prefix="neurovoxel-test-") as directory:
-        root = Path(directory) / "ds007401"
-
-        openneuro.download(
-            dataset="ds007401",
-            tag=tag,
-            target_dir=root,
-            include=["sub-3", "sub-4", "sub-32", "sub-33", "sub-34"],
-        )
-
-        yield SimpleNamespace(
-            path=root,
-            parquet_path=Path(directory) / "ds007401.parquet",
-        )
+    return SimpleNamespace(
+        path=root,
+        parquet_path=tmp_path / "bids.parquet",
+    )
 
 
 def test_load_bids(bids: SimpleNamespace) -> None:
     """Test loading a BIDS dataset."""
     result = mod.load_bids(bids.path, bids.parquet_path)
     assert isinstance(result, BIDSLayout)
+    assert result.get_subjects() == ["01", "02"]
+    assert bids.parquet_path.is_file()
 
 
 # Test parse_layout function
@@ -106,6 +111,15 @@ def test_parse_layout(bids: SimpleNamespace) -> None:
     result = mod.parse_layout(layout)
     assert isinstance(result, pd.DataFrame)
     assert {"name", "datatype", "suffix"}.issubset(result.columns)
+    expected = pd.DataFrame(
+        {
+            "name": ["FLAIR", "T1w"],
+            "datatype": ["anat", "anat"],
+            "suffix": ["FLAIR", "T1w"],
+        }
+    )
+    pd.testing.assert_frame_equal(result[expected.columns], expected)
+    assert {"sub", "ses", "ext"}.isdisjoint(result.columns)
 
 
 @pytest.fixture
