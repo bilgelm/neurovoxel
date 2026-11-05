@@ -109,9 +109,7 @@ def run_query(  # noqa: PLR0913
 
     tbl = tbl.copy()
 
-    tbl["session"] = (
-        tbl["session"].astype("string").str.strip().str.zfill(2)
-    )
+    tbl["session"] = tbl["session"].astype("string").str.strip().str.zfill(2)
     image_df["session"] = (
         image_df["session"].astype("string").str.strip().str.zfill(2)
     )
