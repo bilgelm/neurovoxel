@@ -179,7 +179,7 @@ def main(
 
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
-        _save_analysis_results(lhs, valid_outputdir)
+        _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
 
     render_footer()
     if debug:
@@ -216,5 +216,8 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
-    # argparse will have converted --config-file to a Path (or None)
-    main(config_file=args.config_file, autoload=args.autoload, debug=args.debug)
+    main(
+        config_file=args.config_file,
+        autoload=args.autoload,
+        debug=args.debug,
+    )
