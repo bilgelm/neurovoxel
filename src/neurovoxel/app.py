@@ -4,11 +4,15 @@
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import streamlit as st
 from atlasreader import (
     create_output,  # pyright: ignore[reportUnknownVariableType]
 )
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from neurovoxel.components.data import render_entity_table
 from neurovoxel.components.footer import render_footer
@@ -31,7 +35,6 @@ from neurovoxel.utils.load_parse import (
 )
 from neurovoxel.utils.model_diagnostics import (
     generate_ols_results_pdf,
-    generate_r_square_img,
 )
 from neurovoxel.utils.output import (
     parameter_output,
@@ -183,15 +186,14 @@ def main(
 
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
-        _save_analysis_results(lhs, valid_outputdir)
-        r_square_img = generate_r_square_img(
-            r_square=st.session_state.result["r_square"],
-            masker=st.session_state.masker,
-        )
+        _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
+        stat_values: dict[str, np.typing.NDArray[np.float64]] = {
+            "r_square": st.session_state.result["r_square"],
+            "f_stat": st.session_state.result["f_stat"],
+        }
         generate_ols_results_pdf(
-            r_square=st.session_state.result["r_square"],
+            stat_values=stat_values,
             masker=st.session_state.masker,
-            r_square_img=r_square_img,
             bg_img=st.session_state.get("paths", {}).get("template"),
             output_path=Path(st.session_state.paths["outputdir"])
                 / "ols_results.pdf",
@@ -232,5 +234,8 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
-    # argparse will have converted --config-file to a Path (or None)
-    main(config_file=args.config_file, autoload=args.autoload, debug=args.debug)
+    main(
+        config_file=args.config_file,
+        autoload=args.autoload,
+        debug=args.debug,
+    )
