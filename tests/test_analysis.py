@@ -525,7 +525,7 @@ def make_y() -> np.ndarray:
 
 def test_no_standardization_leaves_clean_data_unchanged() -> None:
     """Ensure the no-op path preserves an already-clean matrix."""
-    result = prepare_y_mat(make_y(), "keep", "none")
+    result = prepare_y_mat(make_y(), "include", "none")
 
     np.testing.assert_array_equal(result, make_y())
 
@@ -534,7 +534,7 @@ def test_returns_same_array_object_modified_in_place() -> None:
     """Documents current behavior: the input array is mutated and returned."""
     y = make_y()
 
-    result = prepare_y_mat(y, "keep", "center")
+    result = prepare_y_mat(y, "include", "center")
 
     assert result is y
 
@@ -546,7 +546,7 @@ def test_nan_voxel_is_zeroed_for_all_observations() -> None:
     """A NaN voxel should be zeroed across all observations."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
-    result = prepare_y_mat(y, "keep", "none")
+    result = prepare_y_mat(y, "include", "none")
 
     # whole column 1 is zeroed, including the non-NaN observation (4.0)
     np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
@@ -558,7 +558,7 @@ def test_no_nans_remain_after_processing() -> None:
     """Any NaN values should be removed or masked after processing."""
     y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
-    result = prepare_y_mat(y, "keep", "scale")
+    result = prepare_y_mat(y, "include", "scale")
 
     assert not np.isnan(result).any()
 
@@ -580,14 +580,14 @@ def test_zero_voxel_kept_when_not_excluding() -> None:
     """A zero voxel should be preserved when inclusion is requested."""
     y = np.array([[0.0, 1.0], [2.0, 3.0]])
 
-    result = prepare_y_mat(y, "keep", "none")
+    result = prepare_y_mat(y, "include", "none")
 
     np.testing.assert_array_equal(result, [[0.0, 1.0], [2.0, 3.0]])
 
 
 def test_nan_voxels_excluded_regardless_of_zero_option() -> None:
     """NaN voxels should be removed regardless of the zero filtering option."""
-    for option in ("keep", "exclude"):
+    for option in ("include", "exclude"):
         y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
         result = prepare_y_mat(y, option, "none")
@@ -601,14 +601,14 @@ def test_nan_voxels_excluded_regardless_of_zero_option() -> None:
 def test_center_subtracts_single_global_mean() -> None:
     """Centering should subtract one global mean from every voxel value."""
     # global mean of all values = 2.5 (one mean, not one per column)
-    result = prepare_y_mat(make_y(), "keep", "center")
+    result = prepare_y_mat(make_y(), "include", "center")
 
     np.testing.assert_allclose(result, [[-1.5, -0.5], [0.5, 1.5]])
 
 
 def test_scale_gives_zero_mean_unit_sd() -> None:
     """Scaling should standardize to zero mean and unit population SD."""
-    result = prepare_y_mat(make_y(), "keep", "scale")
+    result = prepare_y_mat(make_y(), "include", "scale")
 
     np.testing.assert_allclose(float(np.mean(result)), 0.0, atol=1e-12)
     np.testing.assert_allclose(float(np.std(result)), 1.0, atol=1e-12)
@@ -621,7 +621,7 @@ def test_scale_matches_expected_values() -> None:
     """
     sd = np.sqrt(1.25)  # population sd (np.std default) of centered values
 
-    result = prepare_y_mat(make_y(), "keep", "scale")
+    result = prepare_y_mat(make_y(), "include", "scale")
 
     np.testing.assert_allclose(
         result, np.array([[-1.5, -0.5], [0.5, 1.5]]) / sd
@@ -633,7 +633,7 @@ def test_scale_preserves_relative_structure() -> None:
     y = np.array([[1.0, 5.0, 2.0], [4.0, 1.0, 9.0], [7.0, 3.0, 6.0]])
     expected_corr = np.corrcoef(y.ravel(), np.arange(9))[0, 1]
 
-    result = prepare_y_mat(y.copy(), "keep", "scale")
+    result = prepare_y_mat(y.copy(), "include", "scale")
 
     actual_corr = np.corrcoef(result.ravel(), np.arange(9))[0, 1]
     np.testing.assert_allclose(
@@ -648,7 +648,7 @@ def test_excluded_voxels_stay_zero_after_centering() -> None:
     """Excluded voxels should stay exactly zero during centering."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
-    result = prepare_y_mat(y, "keep", "center")
+    result = prepare_y_mat(y, "include", "center")
 
     # excluded column must stay exactly 0 (not shifted by the mean)
     np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
@@ -659,7 +659,7 @@ def test_stats_computed_only_from_non_excluded_voxels() -> None:
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
     kept_mean = np.mean([1.0, 3.0, 2.0, 5.0])  # 2.75; ignores column 1
 
-    result = prepare_y_mat(y, "keep", "center")
+    result = prepare_y_mat(y, "include", "center")
 
     np.testing.assert_allclose(
         result[:, [0, 2]], np.array([[1.0, 3.0], [2.0, 5.0]]) - kept_mean
@@ -681,7 +681,7 @@ def test_scale_with_excluded_zero_voxel() -> None:
 # ------------------------------------------------------------------------ shape
 
 
-@pytest.mark.parametrize("zero_opt", ["keep", "exclude"])
+@pytest.mark.parametrize("zero_opt", ["include", "exclude"])
 @pytest.mark.parametrize("std_opt", ["none", "center", "scale"])
 def test_output_shape_is_preserved(zero_opt: str, std_opt: str) -> None:
     """Preprocessing should keep the original matrix shape."""
