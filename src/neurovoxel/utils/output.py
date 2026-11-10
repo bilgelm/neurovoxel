@@ -52,4 +52,3 @@ def parameter_output(
         "atlasreader output in output folder": atlasreader_output,
         "packages": packages,
     }
-

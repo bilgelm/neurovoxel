@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, sentinel
 
+import numpy as np
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -11,16 +12,26 @@ import neurovoxel.app as mod
 
 
 def test_app_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test if streamlit app runs."""
-    # AppTest inherits pytest's argv; supply the app's arguments explicitly.
-    monkeypatch.setattr(sys, "argv", ["src/neurovoxel/app.py"])
-    app = AppTest.from_file("src/neurovoxel/app.py").run(timeout=30)
+    """Test if the Streamlit app runs."""
+    project_root = Path(__file__).resolve().parents[1]
+    app_path = project_root / "src" / "neurovoxel" / "app.py"
+
+    monkeypatch.chdir(project_root)
+    monkeypatch.setattr(sys, "argv", [str(app_path)])
+
+    app = AppTest.from_file(str(app_path)).run(timeout=30)
+
     assert not app.exception
 
 
 def test_app_parses_streamlit_arguments(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Test that the Streamlit app correctly parses command-line arguments."""
+    project_root = Path(__file__).resolve().parents[1]
+    app_path = project_root / "src" / "neurovoxel" / "app.py"
+    monkeypatch.chdir(project_root)
+
     """Honor application flags even when a Streamlit script context exists."""
     config_file = tmp_path / "config.json"
     mocked_load_config = Mock(return_value={})
@@ -35,7 +46,7 @@ def test_app_parses_streamlit_arguments(
         sys,
         "argv",
         [
-            "src/neurovoxel/app.py",
+            str(app_path),
             "--config-file",
             str(config_file),
             "--autoload",
@@ -43,7 +54,7 @@ def test_app_parses_streamlit_arguments(
         ],
     )
 
-    app = AppTest.from_file("src/neurovoxel/app.py").run(timeout=30)
+    app = AppTest.from_file(str(app_path)).run(timeout=30)
 
     assert not app.exception
     mocked_load_config.assert_called_once_with(config_file)
@@ -346,6 +357,8 @@ def app_mocks(
     for name, mocked_helper in helpers.items():
         monkeypatch.setattr(mod, name, mocked_helper)
 
+    monkeypatch.setattr(mod, "generate_ols_results_pdf", Mock())
+
     return mocked_st, helpers
 
 
@@ -371,6 +384,13 @@ def test_main_success(
     }
     helpers["load_config"].return_value = config
 
+    mocked_st.session_state.result = {
+        "r_square": np.array([0.25, 0.75], dtype=np.float64),
+        "f_stat": np.array([2.0, 3.0], dtype=np.float64),
+    }
+
+    mocked_st.session_state.paths["outputdir"] = str(tmp_path)
+
     mod.main(
         config_file=config_file,
         autoload=autoload,
@@ -388,7 +408,11 @@ def test_main_success(
 
     if use_config:
         helpers["load_config"].assert_called_once_with(config_file)
-        assert mocked_st.session_state.paths == config["paths"]
+        expected_paths = {
+            "outputdir": str(tmp_path),
+            **config["paths"],
+        }
+        assert mocked_st.session_state.paths == expected_paths
         assert mocked_st.session_state.analysis == config["analysis"]
     else:
         helpers["load_config"].assert_not_called()

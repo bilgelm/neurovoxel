@@ -48,7 +48,6 @@ def unmask(
     return masker.inverse_transform(masked_img)
 
 
-
 def basic_viz(
     result: PermutedOLSResult,
     masker: MultiNiftiMasker,

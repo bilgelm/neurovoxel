@@ -192,7 +192,7 @@ def run_query(  # noqa: PLR0913
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
     r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
-    f_statistic_results = ols_results.Fcontrast([0,1])  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+    f_statistic_results = ols_results.Fcontrast([0, 1])  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
     f_stat = np.asarray(f_statistic_results.F).ravel()
 
     # ------------------------------

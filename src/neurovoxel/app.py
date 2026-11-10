@@ -4,15 +4,13 @@
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TypedDict
 
+import numpy as np
 import streamlit as st
 from atlasreader import (
     create_output,  # pyright: ignore[reportUnknownVariableType]
 )
-
-if TYPE_CHECKING:
-    import numpy as np
 
 from neurovoxel.components.data import render_entity_table
 from neurovoxel.components.footer import render_footer
@@ -187,16 +185,28 @@ def main(
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
         _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
-        stat_values: dict[str, np.typing.NDArray[np.float64]] = {
-            "r_square": st.session_state.result["r_square"],
-            "f_stat": st.session_state.result["f_stat"],
+
+        class StatValues(TypedDict):
+            array: np.typing.NDArray[np.float64]
+            vmax: float
+
+        stat_values: dict[str, StatValues] = {
+            "r_square": {
+                "array": st.session_state.result["r_square"],
+                "vmax": 1.0,
+            },
+            "f_stat": {
+                "array": st.session_state.result["f_stat"],
+                "vmax": float(np.nanmax(st.session_state.result["f_stat"])),
+            },
         }
+
         generate_ols_results_pdf(
             stat_values=stat_values,
             masker=st.session_state.masker,
             bg_img=st.session_state.get("paths", {}).get("template"),
             output_path=Path(st.session_state.paths["outputdir"])
-                / "ols_results.pdf",
+            / "ols_results.pdf",
         )
 
     render_footer()

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import nibabel as nib
 import numpy as np
@@ -75,61 +76,70 @@ def test_get_masker_builds_real_masker() -> None:
 ######################
 
 
-def test_run_query_aligns_rows_and_selects_inference_term(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Ensure query execution aligns rows and keeps the inference term.
+class FakeImage:
+    """Represent an image with the minimal entities and path used in tests."""
 
-    The selected inference term should remain available after aligning the
-    rows in the query output.
-    """
-    tbl = pd.DataFrame(
-        {
-            "subject": ["01", "02", "03"],
-            "session": ["1", "1", "1"],
-            "age": [10.0, 20.0, np.nan],
-        }
-    )
+    def __init__(self, subject: str) -> None:
+        """Initialize the fake image with a subject ID."""
+        self.subject: str = subject
+        self.path: str = f"sub-{subject}.nii.gz"
 
-    class FakeImage:
-        def __init__(self, subject: str) -> None:
-            self.subject = subject
-            self.path = f"sub-{subject}.nii.gz"
+    def get_entities(self) -> dict[str, str]:
+        """Return the entities associated with the fake image."""
+        return {"sub": self.subject, "ses": "1"}
 
-        def get_entities(self) -> dict[str, str]:
-            return {"sub": self.subject, "ses": "1"}
 
-    images = [FakeImage(subject) for subject in tbl["subject"]]
+def _make_run_query_images(tbl: pd.DataFrame) -> list[FakeImage]:
+    """Build the fake image objects used by the query test."""
+    return [FakeImage(str(subject)) for subject in tbl["subject"]]
+
+
+def _install_run_query_mocks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tbl: pd.DataFrame,
+    images: list[FakeImage],
+) -> object:
+    """Attach the minimal fake dependencies needed by run_query."""
 
     class FakeMasker:
         def fit_transform(self, paths: list[Path]) -> list[np.ndarray]:
-            # Pretends to mask images and return their respective arrays.
-            assert list(paths) == [tmp_path / image.path for image in images]
+            assert list(paths) == [
+                tmp_path / str(image.path)
+                for image in images  # type: ignore  # noqa: PGH003
+            ]
             return [
                 np.array([[1.0, 2.0]]),
                 np.array([[3.0, 4.0]]),
                 np.array([[5.0, 6.0]]),
-            ]  # fake results of masking
+            ]
 
     class FakeOLSModel:
         def __init__(self, x: np.ndarray) -> None:
             np.testing.assert_array_equal(
                 x,
                 [
-                    [1.0, 10.0],  # subject 01: intercept and age
+                    [1.0, 10.0],
                     [1.0, 20.0],
-                ],  # subject 02: intercept and age
+                ],
             )
 
         def fit(self, y: np.ndarray) -> SimpleNamespace:
             np.testing.assert_array_equal(y, [[1.0, 2.0], [3.0, 4.0]])
+
+            def fake_fcontrast(contrast: object) -> SimpleNamespace:
+                np.testing.assert_array_equal(contrast, [0, 1])
+                return SimpleNamespace(F=np.array([2.0, 3.0]))
+
             return SimpleNamespace(
                 theta=np.array(
                     [
-                        [100.0, 101.0],  # intercept betas
-                        [200.0, 201.0],  # age betas
+                        [100.0, 101.0],
+                        [200.0, 201.0],
                     ]
-                )
+                ),
+                r_square=np.array([0.25, 0.75]),
+                Fcontrast=fake_fcontrast,
             )
 
     def fake_permuted_ols(**kwargs: object) -> dict[str, np.ndarray]:
@@ -146,12 +156,9 @@ def test_run_query_aligns_rows_and_selects_inference_term(
     def fake_formula(_query: object) -> SimpleNamespace:
         return SimpleNamespace(rhs=SimpleNamespace(required_variables={"age"}))
 
-    monkeypatch.setattr(mod, "Formula", fake_formula)
-
     def fake_model_matrix(
         _rhs: object, _data: object, **kwargs: object
     ) -> pd.DataFrame:
-        # run_query must keep NaN rows here and drop them itself later
         assert kwargs["na_action"] == "ignore"
         return pd.DataFrame(
             {
@@ -160,15 +167,35 @@ def test_run_query_aligns_rows_and_selects_inference_term(
             }
         )
 
-    monkeypatch.setattr(mod, "model_matrix", fake_model_matrix)
-    monkeypatch.setattr(mod, "OLSModel", FakeOLSModel)
-    monkeypatch.setattr(mod, "permuted_ols", fake_permuted_ols)
-
     def fake_prepare_y_mat(y: object, *_args: object) -> object:
         return y
 
+    monkeypatch.setattr(mod, "Formula", fake_formula)
+    monkeypatch.setattr(mod, "model_matrix", fake_model_matrix)
+    monkeypatch.setattr(mod, "OLSModel", FakeOLSModel)
+    monkeypatch.setattr(mod, "permuted_ols", fake_permuted_ols)
     monkeypatch.setattr(mod, "prepare_y_mat", fake_prepare_y_mat)
     monkeypatch.setattr(mod, "MIN_N_OBS", 2)
+    return FakeMasker()
+
+
+def test_run_query_aligns_rows_and_selects_inference_term(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ensure query execution aligns rows and keeps the inference term.
+
+    The selected inference term should remain available after aligning the
+    rows in the query output.
+    """
+    tbl = pd.DataFrame(
+        {
+            "subject": ["01", "02", "03"],
+            "session": ["1", "1", "1"],
+            "age": [10.0, 20.0, np.nan],
+        }
+    )
+    images = _make_run_query_images(tbl)
+    masker = _install_run_query_mocks(monkeypatch, tmp_path, tbl, images)
 
     result, final_tbl = mod.run_query(
         query="image ~ age",
@@ -176,7 +203,7 @@ def test_run_query_aligns_rows_and_selects_inference_term(
         inference_terms={"age"},
         tbl=tbl,
         images=images,  # type: ignore[arg-type]
-        masker=FakeMasker(),  # type: ignore[arg-type]
+        masker=masker,  # type: ignore[arg-type]
         n_perm=N_PERM,
         n_jobs=1,
         random_state=42,
@@ -185,8 +212,11 @@ def test_run_query_aligns_rows_and_selects_inference_term(
 
     assert result["tested_var_names"] == ["age"]
     np.testing.assert_array_equal(result["beta"], [[200.0, 201.0]])
-    expected_final_tbl_rows = 3
-    assert len(final_tbl) == expected_final_tbl_rows
+    np.testing.assert_array_equal(result["r_square"], [0.25, 0.75])
+    f_stat = cast("dict[str, np.ndarray]", result)["f_stat"]
+    np.testing.assert_array_equal(f_stat, [2.0, 3.0])
+    expected_rows = 3
+    assert len(final_tbl) == expected_rows
 
 
 def test_run_query_invalid_formula(tmp_path: Path) -> None:
@@ -263,7 +293,15 @@ def test_run_query_selects_session(  # noqa: C901 # still don't fully understand
             pass
 
         def fit(self, y: np.ndarray) -> SimpleNamespace:  # noqa: ARG002
-            return SimpleNamespace(theta=np.zeros((2, 2)))
+            def fake_fcontrast(contrast: object) -> SimpleNamespace:
+                np.testing.assert_array_equal(contrast, [0, 1])
+                return SimpleNamespace(F=np.zeros(2))
+
+            return SimpleNamespace(
+                theta=np.zeros((2, 2)),
+                r_square=np.zeros(2),
+                Fcontrast=fake_fcontrast,
+            )
 
     def fake_permuted_ols(**kwargs: object) -> dict[str, object]:
         tested_vars = kwargs["tested_vars"]
@@ -487,7 +525,7 @@ def make_y() -> np.ndarray:
 
 def test_no_standardization_leaves_clean_data_unchanged() -> None:
     """Ensure the no-op path preserves an already-clean matrix."""
-    result = prepare_y_mat(make_y(), "include", "none")
+    result = prepare_y_mat(make_y(), "keep", "none")
 
     np.testing.assert_array_equal(result, make_y())
 
@@ -496,7 +534,7 @@ def test_returns_same_array_object_modified_in_place() -> None:
     """Documents current behavior: the input array is mutated and returned."""
     y = make_y()
 
-    result = prepare_y_mat(y, "include", "center")
+    result = prepare_y_mat(y, "keep", "center")
 
     assert result is y
 
@@ -508,7 +546,7 @@ def test_nan_voxel_is_zeroed_for_all_observations() -> None:
     """A NaN voxel should be zeroed across all observations."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
-    result = prepare_y_mat(y, "include", "none")
+    result = prepare_y_mat(y, "keep", "none")
 
     # whole column 1 is zeroed, including the non-NaN observation (4.0)
     np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
@@ -520,7 +558,7 @@ def test_no_nans_remain_after_processing() -> None:
     """Any NaN values should be removed or masked after processing."""
     y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
-    result = prepare_y_mat(y, "include", "scale")
+    result = prepare_y_mat(y, "keep", "scale")
 
     assert not np.isnan(result).any()
 
@@ -542,14 +580,14 @@ def test_zero_voxel_kept_when_not_excluding() -> None:
     """A zero voxel should be preserved when inclusion is requested."""
     y = np.array([[0.0, 1.0], [2.0, 3.0]])
 
-    result = prepare_y_mat(y, "include", "none")
+    result = prepare_y_mat(y, "keep", "none")
 
     np.testing.assert_array_equal(result, [[0.0, 1.0], [2.0, 3.0]])
 
 
 def test_nan_voxels_excluded_regardless_of_zero_option() -> None:
     """NaN voxels should be removed regardless of the zero filtering option."""
-    for option in ("include", "exclude"):
+    for option in ("keep", "exclude"):
         y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
         result = prepare_y_mat(y, option, "none")
@@ -563,14 +601,14 @@ def test_nan_voxels_excluded_regardless_of_zero_option() -> None:
 def test_center_subtracts_single_global_mean() -> None:
     """Centering should subtract one global mean from every voxel value."""
     # global mean of all values = 2.5 (one mean, not one per column)
-    result = prepare_y_mat(make_y(), "include", "center")
+    result = prepare_y_mat(make_y(), "keep", "center")
 
     np.testing.assert_allclose(result, [[-1.5, -0.5], [0.5, 1.5]])
 
 
 def test_scale_gives_zero_mean_unit_sd() -> None:
     """Scaling should standardize to zero mean and unit population SD."""
-    result = prepare_y_mat(make_y(), "include", "scale")
+    result = prepare_y_mat(make_y(), "keep", "scale")
 
     np.testing.assert_allclose(float(np.mean(result)), 0.0, atol=1e-12)
     np.testing.assert_allclose(float(np.std(result)), 1.0, atol=1e-12)
@@ -583,7 +621,7 @@ def test_scale_matches_expected_values() -> None:
     """
     sd = np.sqrt(1.25)  # population sd (np.std default) of centered values
 
-    result = prepare_y_mat(make_y(), "include", "scale")
+    result = prepare_y_mat(make_y(), "keep", "scale")
 
     np.testing.assert_allclose(
         result, np.array([[-1.5, -0.5], [0.5, 1.5]]) / sd
@@ -595,7 +633,7 @@ def test_scale_preserves_relative_structure() -> None:
     y = np.array([[1.0, 5.0, 2.0], [4.0, 1.0, 9.0], [7.0, 3.0, 6.0]])
     expected_corr = np.corrcoef(y.ravel(), np.arange(9))[0, 1]
 
-    result = prepare_y_mat(y.copy(), "include", "scale")
+    result = prepare_y_mat(y.copy(), "keep", "scale")
 
     actual_corr = np.corrcoef(result.ravel(), np.arange(9))[0, 1]
     np.testing.assert_allclose(
@@ -610,7 +648,7 @@ def test_excluded_voxels_stay_zero_after_centering() -> None:
     """Excluded voxels should stay exactly zero during centering."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
-    result = prepare_y_mat(y, "include", "center")
+    result = prepare_y_mat(y, "keep", "center")
 
     # excluded column must stay exactly 0 (not shifted by the mean)
     np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
@@ -621,7 +659,7 @@ def test_stats_computed_only_from_non_excluded_voxels() -> None:
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
     kept_mean = np.mean([1.0, 3.0, 2.0, 5.0])  # 2.75; ignores column 1
 
-    result = prepare_y_mat(y, "include", "center")
+    result = prepare_y_mat(y, "keep", "center")
 
     np.testing.assert_allclose(
         result[:, [0, 2]], np.array([[1.0, 3.0], [2.0, 5.0]]) - kept_mean
@@ -643,7 +681,7 @@ def test_scale_with_excluded_zero_voxel() -> None:
 # ------------------------------------------------------------------------ shape
 
 
-@pytest.mark.parametrize("zero_opt", ["include", "exclude"])
+@pytest.mark.parametrize("zero_opt", ["keep", "exclude"])
 @pytest.mark.parametrize("std_opt", ["none", "center", "scale"])
 def test_output_shape_is_preserved(zero_opt: str, std_opt: str) -> None:
     """Preprocessing should keep the original matrix shape."""
