@@ -45,6 +45,8 @@ class PermutedOLSResult(TypedDict):
     mass: NotRequired[np.typing.NDArray[Any]]
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
+    r_square: np.typing.NDArray[Any]
+    f_stat: np.typing.NDArray[Any]
 
 
 def get_masker(
@@ -62,7 +64,7 @@ def get_masker(
     )
 
 
-def run_query(  # noqa: PLR0913
+def run_query(  # noqa: PLR0913, PLR0915
     query: str,
     root: Path,
     inference_terms: set[str],
@@ -190,6 +192,18 @@ def run_query(  # noqa: PLR0913
     ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+    r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+
+    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+    if not non_intercept.any():
+        msg = "No non-intercept predictors to test."
+        raise ValueError(msg)
+
+    contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    f_statistic_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+    f_stat = np.asarray(f_statistic_results.F).ravel()
 
     # ------------------------------
     # Run permutation-based inference
@@ -211,6 +225,8 @@ def run_query(  # noqa: PLR0913
 
     # Attach OLS betas explicitly
     res["beta"] = beta_coef[is_inference_term, :]  # pyright: ignore[reportIndexIssue]
+    res["r_square"] = r_square_results  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_stat"] = f_stat  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
@@ -218,7 +234,7 @@ def run_query(  # noqa: PLR0913
 
 def prepare_y_mat(
     y_mat: np.typing.NDArray[Any],
-    handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm])
+    handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],
 ) -> np.typing.NDArray[Any]:
     """Handle NaN (and zero) voxels and perform z-scoring."""

@@ -75,7 +75,7 @@ def test_get_masker_builds_real_masker() -> None:
 ######################
 
 
-def test_run_query_aligns_rows_and_selects_inference_term(
+def test_run_query_aligns_rows_and_selects_inference_term(  # noqa: C901
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Ensure query execution aligns rows and keeps the inference term.
@@ -123,13 +123,20 @@ def test_run_query_aligns_rows_and_selects_inference_term(
 
         def fit(self, y: np.ndarray) -> SimpleNamespace:
             np.testing.assert_array_equal(y, [[1.0, 2.0], [3.0, 4.0]])
+
+            def fake_fcontrast(contrast: object) -> SimpleNamespace:
+                np.testing.assert_array_equal(contrast, [[0, 1]])
+                return SimpleNamespace(F=np.array([2.0, 3.0]))
+
             return SimpleNamespace(
                 theta=np.array(
                     [
                         [100.0, 101.0],  # intercept betas
                         [200.0, 201.0],  # age betas
                     ]
-                )
+                ),
+                r_square=np.array([0.25, 0.75]),
+                Fcontrast=fake_fcontrast,
             )
 
     def fake_permuted_ols(**kwargs: object) -> dict[str, np.ndarray]:
@@ -186,6 +193,13 @@ def test_run_query_aligns_rows_and_selects_inference_term(
     assert result["tested_var_names"] == ["age"]
     np.testing.assert_array_equal(result["beta"], [[200.0, 201.0]])
     expected_final_tbl_rows = 3
+
+    np.testing.assert_array_equal(result["r_square"], [0.25, 0.75])
+    np.testing.assert_array_equal(result["f_stat"], [2.0, 3.0])
+
+    assert result["r_square"].shape == (2,)
+    assert result["f_stat"].shape == (2,)
+
     assert len(final_tbl) == expected_final_tbl_rows
 
 
@@ -263,7 +277,15 @@ def test_run_query_selects_session(  # noqa: C901 # still don't fully understand
             pass
 
         def fit(self, y: np.ndarray) -> SimpleNamespace:  # noqa: ARG002
-            return SimpleNamespace(theta=np.zeros((2, 2)))
+            def fake_fcontrast(contrast: object) -> SimpleNamespace:
+                np.testing.assert_array_equal(contrast, [[0, 1]])
+                return SimpleNamespace(F=np.array([2.0, 3.0]))
+
+            return SimpleNamespace(
+                theta=np.zeros((2, 2)),
+                r_square=np.array([0.25, 0.75]),
+                Fcontrast=fake_fcontrast,
+            )
 
     def fake_permuted_ols(**kwargs: object) -> dict[str, object]:
         tested_vars = kwargs["tested_vars"]

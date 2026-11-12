@@ -4,7 +4,9 @@
 
 import argparse
 from pathlib import Path
+from typing import TypedDict
 
+import numpy as np
 import streamlit as st
 from atlasreader import (
     create_output,  # pyright: ignore[reportUnknownVariableType]
@@ -28,6 +30,9 @@ from neurovoxel.utils.load_parse import (
     load_config,
     parse_layout,
     parse_query,
+)
+from neurovoxel.utils.model_diagnostics import (
+    generate_ols_results_pdf,
 )
 from neurovoxel.utils.output import (
     parameter_output,
@@ -180,6 +185,29 @@ def main(
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
         _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
+
+        class StatValues(TypedDict):
+            array: np.typing.NDArray[np.float64]
+            vmax: float
+
+        stat_values: dict[str, StatValues] = {
+            "r_square": {
+                "array": st.session_state.result["r_square"],
+                "vmax": 1.0,
+            },
+            "f_stat": {
+                "array": st.session_state.result["f_stat"],
+                "vmax": float(np.nanmax(st.session_state.result["f_stat"])),
+            },
+        }
+        if valid_outputdir:
+            generate_ols_results_pdf(
+                stat_values=stat_values,
+                masker=st.session_state.masker,
+                bg_img=st.session_state.get("paths", {}).get("template"),
+                output_path=Path(st.session_state.paths["outputdir"])
+                / "ols_results.pdf",
+            )
 
     render_footer()
     if debug:
