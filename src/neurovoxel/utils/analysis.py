@@ -64,7 +64,7 @@ def get_masker(
     )
 
 
-def run_query(  # noqa: PLR0913
+def run_query(  # noqa: PLR0913, PLR0915
     query: str,
     root: Path,
     inference_terms: set[str],
@@ -193,7 +193,16 @@ def run_query(  # noqa: PLR0913
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
     r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
-    f_statistic_results = ols_results.Fcontrast([0, 1])  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+
+    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+    if not non_intercept.any():
+        msg = "No non-intercept predictors to test."
+        raise ValueError(msg)
+
+    contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    f_statistic_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
     f_stat = np.asarray(f_statistic_results.F).ravel()
 
     # ------------------------------

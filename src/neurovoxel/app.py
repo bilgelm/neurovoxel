@@ -200,14 +200,14 @@ def main(
                 "vmax": float(np.nanmax(st.session_state.result["f_stat"])),
             },
         }
-
-        generate_ols_results_pdf(
-            stat_values=stat_values,
-            masker=st.session_state.masker,
-            bg_img=st.session_state.get("paths", {}).get("template"),
-            output_path=Path(st.session_state.paths["outputdir"])
-            / "ols_results.pdf",
-        )
+        if valid_outputdir:
+            generate_ols_results_pdf(
+                stat_values=stat_values,
+                masker=st.session_state.masker,
+                bg_img=st.session_state.get("paths", {}).get("template"),
+                output_path=Path(st.session_state.paths["outputdir"])
+                / "ols_results.pdf",
+            )
 
     render_footer()
     if debug:
