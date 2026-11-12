@@ -234,7 +234,7 @@ def run_query(  # noqa: PLR0913, PLR0915
 
 def prepare_y_mat(
     y_mat: np.typing.NDArray[Any],
-    handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportgitvalidTypeForm])
+    handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],
 ) -> np.typing.NDArray[Any]:
     """Handle NaN (and zero) voxels and perform z-scoring."""
