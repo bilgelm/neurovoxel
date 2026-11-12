@@ -46,6 +46,7 @@ class PermutedOLSResult(TypedDict):
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
     r_square: np.typing.NDArray[Any]
+    f_stat: np.typing.NDArray[Any]
 
 
 def get_masker(
