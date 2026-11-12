@@ -89,9 +89,7 @@ def test_render_model_runner(
     spinner = MagicMock()
     fake_st = SimpleNamespace(session_state=state, spinner=spinner)
 
-    masker = Mock()
-    masker.fit.return_value = masker
-    get_masker = Mock(return_value=masker)
+    get_masker = Mock(return_value=sentinel.masker)
     run_query = Mock(return_value=(sentinel.result, output_tbl))
 
     monkeypatch.setattr(mod, "st", fake_st)
@@ -99,7 +97,6 @@ def test_render_model_runner(
     monkeypatch.setattr(mod, "run_query", run_query)
 
     returned = mod.render_model_runner("gm")
-    masker.fit.assert_called_once_with()
 
     # Select the requested entity and remove name/missing columns.
     layout.get.assert_called_once_with(suffix="probseg", label="GM")
@@ -119,7 +116,7 @@ def test_render_model_runner(
     assert args[2] == ["age"]
     assert args[3] is input_tbl
     assert args[4] is images
-    assert args[5] is masker
+    assert args[5] is sentinel.masker
 
     assert kwargs == {
         "n_perm": 100,
@@ -131,7 +128,7 @@ def test_render_model_runner(
     }
 
     # Save the analysis outputs into session state.
-    assert state.masker is masker
+    assert state.masker is sentinel.masker
     assert state.result is sentinel.result
     assert state.tbl is output_tbl
     assert returned is None

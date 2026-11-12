@@ -28,7 +28,6 @@ def render_model_runner(lhs: str) -> None:
             st.session_state.get("analysis", {}).get("voxel_size"),
             n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
         )
-        st.session_state.masker.fit()  # pyright: ignore[reportUnknownMemberType]
 
         st.session_state.result, st.session_state.tbl = run_query(
             st.session_state.get("analysis", {}).get("query"),
