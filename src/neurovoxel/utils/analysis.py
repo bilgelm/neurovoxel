@@ -3,7 +3,7 @@
 # pyright: reportMissingTypeStubs=false
 
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -163,7 +163,8 @@ def run_query(  # noqa: PLR0913
     # Build y_mat from the image paths corresponding to the filtered `tbl` so
     # rows of y_mat align with rows of x_mat.
     y_mat = prepare_y_mat(
-        np.vstack(masker.fit_transform(tbl[lhs].values)),  # pyright: ignore[reportCallIssue, reportArgumentType, reportUnknownArgumentType, reportUnknownMemberType]
+        tbl[lhs].to_numpy(),  # pyright: ignore[reportUnknownMemberType]
+        masker,
         handle_zero_voxels,
         voxelwise_standardization,
     )
@@ -217,36 +218,38 @@ def run_query(  # noqa: PLR0913
 
 
 def prepare_y_mat(
-    y_mat: np.typing.NDArray[Any],
+    lhs_values: np.typing.ArrayLike,
+    masker: MultiNiftiMasker,
     handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm])
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],
 ) -> np.typing.NDArray[Any]:
-    """Handle NaN (and zero) voxels and perform z-scoring."""
-    # There is a problem with the approach described below with "exclude"
-    # Permutation test statistics are not computed correctly -
-    # multiple comparison correction accounts for more voxels than needed,
-    # yielding a more conservative result
-    #
-    # "exclude" voxels (columns) where any observation is NaN
-    # Note about "excluding" voxels, throughout this script:
-    # we don't actually exclude to not mess with masker; we just set all
-    # observations for these voxels to 0, preventing any associations
+    """Exclude invalid voxels, update the masker, and standardize the data."""
+    y_mat = cast(
+        "np.typing.NDArray[Any]",
+        np.vstack(masker.fit_transform(lhs_values)),  # pyright: ignore[reportCallIssue, reportArgumentType, reportUnknownMemberType]
+    )
     exclude_col = np.isnan(y_mat).any(axis=0)  # pyright: ignore[reportUnknownArgumentType]
     if handle_zero_voxels == "exclude":
-        # "exclude" voxels (columns) where any observation is 0
+        # Exclude voxels (columns) where any observation is 0.
         exclude_col = np.logical_or(exclude_col, (y_mat == 0).any(axis=0))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    y_mat[:, exclude_col] = 0  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    keep_col = np.asarray(~exclude_col, dtype=bool)
+    if not keep_col.any():
+        msg = "No voxels remain after exclusion."
+        raise ValueError(msg)
+
+    if exclude_col.any():
+        # Map the original column positions into 3D before updating the masker.
+        updated_mask = masker.inverse_transform(keep_col.astype(np.uint8))  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        masker.set_params(mask_img=updated_mask).fit()  # pyright: ignore[reportUnknownMemberType]
+        y_mat = y_mat[:, keep_col]
 
     # center (or scale) voxelwise values by computing a single mean
     # (and a single standard deviation) across all voxels and observations
-    # compute stats only on non-excluded voxels
     # - center: x - mean
     # - scale (z-score): (x - mean) / sd
     if voxelwise_standardization in ["center", "scale"]:
-        vox_mean = np.mean(y_mat[:, ~exclude_col])  # pyright: ignore[reportUnknownArgumentType]
-        y_mat[:, ~exclude_col] -= vox_mean
+        y_mat -= np.mean(y_mat)
     if voxelwise_standardization == "scale":
-        vox_sd = np.std(y_mat[:, ~exclude_col])  # pyright: ignore[reportUnknownArgumentType]
-        y_mat[:, ~exclude_col] /= vox_sd
+        y_mat /= np.std(y_mat)
 
     return y_mat
