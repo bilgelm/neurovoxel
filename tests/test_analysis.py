@@ -1,7 +1,9 @@
 """Test analysis module."""
 
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import nibabel as nib
 import numpy as np
@@ -164,8 +166,10 @@ def test_run_query_aligns_rows_and_selects_inference_term(
     monkeypatch.setattr(mod, "OLSModel", FakeOLSModel)
     monkeypatch.setattr(mod, "permuted_ols", fake_permuted_ols)
 
-    def fake_prepare_y_mat(y: object, *_args: object) -> object:
-        return y
+    def fake_prepare_y_mat(
+        y: list[Path], masker: FakeMasker, *_args: object
+    ) -> np.ndarray:
+        return np.vstack(masker.fit_transform(y))
 
     monkeypatch.setattr(mod, "prepare_y_mat", fake_prepare_y_mat)
     monkeypatch.setattr(mod, "MIN_N_OBS", 2)
@@ -299,8 +303,10 @@ def test_run_query_selects_session(  # noqa: C901 # still don't fully understand
     monkeypatch.setattr(mod, "OLSModel", FakeOLSModel)
     monkeypatch.setattr(mod, "permuted_ols", fake_permuted_ols)
 
-    def _prepare_y_mat(y: np.ndarray, *_args: object) -> np.ndarray:
-        return y
+    def _prepare_y_mat(
+        y: list[Path], masker: FakeMasker, *_args: object
+    ) -> np.ndarray:
+        return masker.fit_transform(y)
 
     monkeypatch.setattr(mod, "prepare_y_mat", _prepare_y_mat)
     monkeypatch.setattr(mod, "MIN_N_OBS", 2)
@@ -470,53 +476,244 @@ def test_run_query_beta_and_t_values(
     )
 
 
+def test_run_query_tfce_with_reduced_masker(tmp_path: Path) -> None:
+    """Run spatial permutation inference after removing an interior voxel."""
+    n_subjects = 12
+    n_perm = 16
+    subjects = [f"{index:02d}" for index in range(n_subjects)]
+    age = np.linspace(20.0, 70.0, n_subjects)
+    rng = np.random.default_rng(42)
+    y = 10.0 + age[:, None] * np.array([0.2, 0.3, -0.4, 0.5])
+    y += rng.normal(size=y.shape)
+    # Only one observation has a zero; the whole interior voxel must be removed.
+    y[0, 1] = 0.0
+    image_data, masker = make_preparation_inputs(y)
+
+    class ImageMetadata:
+        def __init__(self, subject: str, path: Path) -> None:
+            self.subject = subject
+            self.path = str(path)
+
+        def get_entities(self) -> dict[str, str]:
+            return {"sub": self.subject, "ses": "1"}
+
+    images: list[ImageMetadata] = []
+    for subject, image in zip(subjects, image_data, strict=True):
+        path = tmp_path / f"sub-{subject}_ses-1_map.nii.gz"
+        cast("Nifti1Image", image).to_filename(path)  # pyright: ignore[reportUnknownMemberType]
+        images.append(ImageMetadata(subject, path))
+    tbl = pd.DataFrame({"subject": subjects, "session": "1", "age": age})
+
+    result, final_tbl = mod.run_query(
+        query="image ~ age",
+        root=tmp_path,
+        inference_terms={"age"},
+        tbl=tbl,
+        images=images,  # pyright: ignore[reportArgumentType]
+        masker=masker,
+        n_perm=n_perm,
+        n_jobs=1,
+        random_state=42,
+        tfce=True,
+        handle_zero_voxels="exclude",
+        voxelwise_standardization="none",
+    )
+
+    assert len(final_tbl) == n_subjects
+    assert result["tested_var_names"] == ["age"]
+    retained = np.zeros((4, 2, 2), dtype=bool)
+    retained[[0, 2, 3], 0, 0] = True
+    fitted_mask = cast("Nifti1Image", masker.mask_img_)  # pyright: ignore[reportUnknownMemberType]
+    np.testing.assert_array_equal(fitted_mask.get_fdata(), retained)
+    assert masker.n_elements_ == retained.sum()
+
+    # Independently verify column order and t statistics with an OLS reference.
+    design = np.column_stack([np.ones(n_subjects), age])
+    kept_y = y[:, [0, 2, 3]]
+    coefficients, *_ = np.linalg.lstsq(design, kept_y, rcond=None)
+    residuals = kept_y - design @ coefficients
+    residual_variance = np.sum(residuals**2, axis=0) / (n_subjects - 2)
+    slope_variance = residual_variance * np.linalg.inv(design.T @ design)[1, 1]
+    np.testing.assert_allclose(result["beta"], coefficients[1:])
+    np.testing.assert_allclose(
+        result["t"], coefficients[1:] / np.sqrt(slope_variance)
+    )
+
+    assert "tfce" in result
+    assert "logp_max_tfce" in result
+    assert "h0_max_tfce" in result
+    assert result["h0_max_tfce"].shape == (1, n_perm)
+    assert np.isfinite(result["h0_max_tfce"]).all()
+    assert np.all(np.abs(result["tfce"]) > 0)
+    for values in (
+        result["beta"],
+        result["t"],
+        result["tfce"],
+        result["logp_max_t"],
+        result["logp_max_tfce"],
+    ):
+        assert values.shape == (1, 3)
+        assert np.isfinite(values).all()
+        stat_img = cast("Nifti1Image", masker.inverse_transform(values[0]))  # pyright: ignore[reportUnknownMemberType]
+        stat_data = stat_img.get_fdata()
+        assert stat_img.shape == retained.shape
+        assert stat_img.affine is not None
+        np.testing.assert_allclose(stat_img.affine, np.eye(4))
+        np.testing.assert_allclose(stat_data[retained], values[0])
+        np.testing.assert_array_equal(stat_data[~retained], 0)
+
+
 ###############################
 # Tests for prepare_y_mat()
 ###############################
 
-prepare_y_mat = mod.prepare_y_mat
+
+def make_preparation_inputs(
+    y: np.ndarray,
+) -> tuple[np.ndarray, MultiNiftiMasker]:
+    """Represent matrix columns as spatial voxels in small subject images."""
+    shape = (y.shape[1], 2, 2)
+    mask = np.zeros(shape, dtype=np.uint8)
+    mask[:, 0, 0] = 1
+    masker = MultiNiftiMasker(mask_img=Nifti1Image(mask, np.eye(4)))
+    images: list[Nifti1Image] = []
+    for row in y:
+        data = np.zeros(shape)
+        data[:, 0, 0] = row
+        images.append(Nifti1Image(data, np.eye(4)))
+    return np.array(images, dtype=object), masker
+
+
+@pytest.mark.parametrize("zero_opt", ["include", "exclude"])
+@pytest.mark.parametrize("std_opt", ["none", "center", "scale"])
+def test_preparation_excludes_columns_and_preserves_mapping(
+    zero_opt: str,
+    std_opt: str,
+) -> None:
+    """Retained data and reconstructed statistics must use the same voxels."""
+    y = np.array([[0.0, 1.0, 3.0, 4.0], [2.0, 4.0, 5.0, 6.0]])
+    images, masker = make_preparation_inputs(y)
+    result = mod.prepare_y_mat(images, masker, zero_opt, std_opt)
+    keep = np.array([zero_opt == "include", True, True, True])
+    expected = y[:, keep].copy()
+    if std_opt in ["center", "scale"]:
+        expected -= expected.mean()
+    if std_opt == "scale":
+        expected /= expected.std()
+    np.testing.assert_allclose(result, expected)
+    assert masker.n_elements_ == keep.sum()
+    reconstructed_img = cast("Nifti1Image", masker.inverse_transform(result))  # pyright: ignore[reportUnknownMemberType]
+    reconstructed = reconstructed_img.get_fdata()
+    np.testing.assert_allclose(reconstructed[keep, 0, 0, :].T, result)
+    np.testing.assert_array_equal(reconstructed[~keep, 0, 0, :], 0)
+
+
+@pytest.mark.parametrize("zero_opt", ["include", "exclude"])
+@pytest.mark.parametrize("std_opt", ["none", "center", "scale"])
+def test_nan_columns_excluded(
+    zero_opt: str,
+    std_opt: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drop NaN columns whenever they occur in the extracted matrix."""
+    y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
+    images, masker = make_preparation_inputs(y)
+    masker.fit()  # pyright: ignore[reportUnknownMemberType]
+    # Nilearn can replace NaNs during extraction; inject extracted NaNs to
+    # exercise our filtering independently of its preprocessing behavior.
+    calls: list[np.typing.ArrayLike] = []
+
+    def fake_fit_transform(values: np.typing.ArrayLike) -> np.ndarray:
+        calls.append(values)
+        return y
+
+    monkeypatch.setattr(masker, "fit_transform", fake_fit_transform)
+    result = mod.prepare_y_mat(images, masker, zero_opt, std_opt)
+    assert len(calls) == 1
+    assert calls[0] is images
+    expected = y[:, [0, 2]].copy()
+    if std_opt in ["center", "scale"]:
+        expected -= expected.mean()
+    if std_opt == "scale":
+        expected /= expected.std()
+    np.testing.assert_allclose(result, expected)
+    np.testing.assert_array_equal(
+        cast("Nifti1Image", masker.mask_img_).get_fdata()[:, 0, 0],  # pyright: ignore[reportUnknownMemberType]
+        [1, 0, 1],
+    )
+
+
+def test_all_voxels_excluded_raises() -> None:
+    """Fail clearly when no voxels remain for inference."""
+    images, masker = make_preparation_inputs(np.zeros((2, 3)))
+    with pytest.raises(ValueError, match="No voxels remain after exclusion"):
+        mod.prepare_y_mat(images, masker, "exclude", "none")
+
+
+PrepareYMat = Callable[[np.ndarray, str, str], np.ndarray]
+
+
+@pytest.fixture
+def prepare_y_mat(monkeypatch: pytest.MonkeyPatch) -> PrepareYMat:
+    """Exercise extracted-matrix cases with a real fitted spatial masker."""
+
+    def prepare(y: np.ndarray, zero_opt: str, std_opt: str) -> np.ndarray:
+        images, masker = make_preparation_inputs(y)
+        masker.fit()  # pyright: ignore[reportUnknownMemberType]
+
+        # Preserve NaNs that Nilearn may otherwise replace during extraction.
+        def fake_fit_transform(_values: np.typing.ArrayLike) -> np.ndarray:
+            return y.copy()
+
+        monkeypatch.setattr(masker, "fit_transform", fake_fit_transform)
+        return mod.prepare_y_mat(images, masker, zero_opt, std_opt)
+
+    return prepare
 
 
 def make_y() -> np.ndarray:
-    """Fresh float array each call (the function mutates its input)."""
+    """Return a fresh matrix for each preprocessing test."""
     return np.array([[1.0, 2.0], [3.0, 4.0]])
 
 
 # ---------------------------------------------------------------- no-op path
 
 
-def test_no_standardization_leaves_clean_data_unchanged() -> None:
+def test_no_standardization_leaves_clean_data_unchanged(
+    prepare_y_mat: PrepareYMat,
+) -> None:
     """Ensure the no-op path preserves an already-clean matrix."""
     result = prepare_y_mat(make_y(), "include", "none")
 
     np.testing.assert_array_equal(result, make_y())
 
 
-def test_returns_same_array_object_modified_in_place() -> None:
-    """Documents current behavior: the input array is mutated and returned."""
+def test_input_matrix_is_preserved(prepare_y_mat: PrepareYMat) -> None:
+    """Image extraction should leave the source matrix unchanged."""
     y = make_y()
 
     result = prepare_y_mat(y, "include", "center")
 
-    assert result is y
+    assert result is not y
+    np.testing.assert_array_equal(y, make_y())
+    np.testing.assert_allclose(result, make_y() - make_y().mean())
 
 
 # ------------------------------------------------------------------ NaN voxels
 
 
-def test_nan_voxel_is_zeroed_for_all_observations() -> None:
-    """A NaN voxel should be zeroed across all observations."""
+def test_nan_voxel_is_excluded_for_all_observations(
+    prepare_y_mat: PrepareYMat,
+) -> None:
+    """A NaN in any observation should exclude the whole voxel."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
     result = prepare_y_mat(y, "include", "none")
 
-    # whole column 1 is zeroed, including the non-NaN observation (4.0)
-    np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
-    np.testing.assert_array_equal(result[:, 0], [1.0, 2.0])
-    np.testing.assert_array_equal(result[:, 2], [3.0, 5.0])
+    np.testing.assert_array_equal(result, [[1.0, 3.0], [2.0, 5.0]])
 
 
-def test_no_nans_remain_after_processing() -> None:
+def test_no_nans_remain_after_processing(prepare_y_mat: PrepareYMat) -> None:
     """Any NaN values should be removed or masked after processing."""
     y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
@@ -528,17 +725,16 @@ def test_no_nans_remain_after_processing() -> None:
 # ----------------------------------------------------------------- zero voxels
 
 
-def test_zero_voxel_excluded_when_requested() -> None:
+def test_zero_voxel_excluded_when_requested(prepare_y_mat: PrepareYMat) -> None:
     """A zero voxel should be removed when exclusion is requested."""
     y = np.array([[0.0, 1.0], [2.0, 3.0]])
 
     result = prepare_y_mat(y, "exclude", "none")
 
-    # column 0 contains a zero, so the whole column is zeroed
-    np.testing.assert_array_equal(result, [[0.0, 1.0], [0.0, 3.0]])
+    np.testing.assert_array_equal(result, [[1.0], [3.0]])
 
 
-def test_zero_voxel_kept_when_not_excluding() -> None:
+def test_zero_voxel_kept_when_not_excluding(prepare_y_mat: PrepareYMat) -> None:
     """A zero voxel should be preserved when inclusion is requested."""
     y = np.array([[0.0, 1.0], [2.0, 3.0]])
 
@@ -547,20 +743,24 @@ def test_zero_voxel_kept_when_not_excluding() -> None:
     np.testing.assert_array_equal(result, [[0.0, 1.0], [2.0, 3.0]])
 
 
-def test_nan_voxels_excluded_regardless_of_zero_option() -> None:
+def test_nan_voxels_excluded_regardless_of_zero_option(
+    prepare_y_mat: PrepareYMat,
+) -> None:
     """NaN voxels should be removed regardless of the zero filtering option."""
     for option in ("include", "exclude"):
         y = np.array([[np.nan, 1.0], [2.0, 3.0]])
 
         result = prepare_y_mat(y, option, "none")
 
-        np.testing.assert_array_equal(result[:, 0], [0.0, 0.0])
+        np.testing.assert_array_equal(result, [[1.0], [3.0]])
 
 
 # --------------------------------------------------------------- standardizing
 
 
-def test_center_subtracts_single_global_mean() -> None:
+def test_center_subtracts_single_global_mean(
+    prepare_y_mat: PrepareYMat,
+) -> None:
     """Centering should subtract one global mean from every voxel value."""
     # global mean of all values = 2.5 (one mean, not one per column)
     result = prepare_y_mat(make_y(), "include", "center")
@@ -568,7 +768,7 @@ def test_center_subtracts_single_global_mean() -> None:
     np.testing.assert_allclose(result, [[-1.5, -0.5], [0.5, 1.5]])
 
 
-def test_scale_gives_zero_mean_unit_sd() -> None:
+def test_scale_gives_zero_mean_unit_sd(prepare_y_mat: PrepareYMat) -> None:
     """Scaling should standardize to zero mean and unit population SD."""
     result = prepare_y_mat(make_y(), "include", "scale")
 
@@ -576,7 +776,7 @@ def test_scale_gives_zero_mean_unit_sd() -> None:
     np.testing.assert_allclose(float(np.std(result)), 1.0, atol=1e-12)
 
 
-def test_scale_matches_expected_values() -> None:
+def test_scale_matches_expected_values(prepare_y_mat: PrepareYMat) -> None:
     """Scaling should match the global z-score transform expected.
 
     from the data.
@@ -590,7 +790,7 @@ def test_scale_matches_expected_values() -> None:
     )
 
 
-def test_scale_preserves_relative_structure() -> None:
+def test_scale_preserves_relative_structure(prepare_y_mat: PrepareYMat) -> None:
     """Scaling is a global shift and stretch, so correlations are unchanged."""
     y = np.array([[1.0, 5.0, 2.0], [4.0, 1.0, 9.0], [7.0, 3.0, 6.0]])
     expected_corr = np.corrcoef(y.ravel(), np.arange(9))[0, 1]
@@ -606,17 +806,21 @@ def test_scale_preserves_relative_structure() -> None:
 # ----------------------------------------------- interaction: exclusion + stats
 
 
-def test_excluded_voxels_stay_zero_after_centering() -> None:
-    """Excluded voxels should stay exactly zero during centering."""
+def test_excluded_voxels_remain_absent_after_centering(
+    prepare_y_mat: PrepareYMat,
+) -> None:
+    """Centering should retain only the valid voxel columns."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
 
     result = prepare_y_mat(y, "include", "center")
 
-    # excluded column must stay exactly 0 (not shifted by the mean)
-    np.testing.assert_array_equal(result[:, 1], [0.0, 0.0])
+    assert result.shape == (2, 2)
+    np.testing.assert_allclose(result, [[-1.75, 0.25], [-0.75, 2.25]])
 
 
-def test_stats_computed_only_from_non_excluded_voxels() -> None:
+def test_stats_computed_only_from_non_excluded_voxels(
+    prepare_y_mat: PrepareYMat,
+) -> None:
     """Statistics should ignore voxels excluded by a NaN mask."""
     y = np.array([[1.0, np.nan, 3.0], [2.0, 4.0, 5.0]])
     kept_mean = np.mean([1.0, 3.0, 2.0, 5.0])  # 2.75; ignores column 1
@@ -624,18 +828,18 @@ def test_stats_computed_only_from_non_excluded_voxels() -> None:
     result = prepare_y_mat(y, "include", "center")
 
     np.testing.assert_allclose(
-        result[:, [0, 2]], np.array([[1.0, 3.0], [2.0, 5.0]]) - kept_mean
+        result, np.array([[1.0, 3.0], [2.0, 5.0]]) - kept_mean
     )
 
 
-def test_scale_with_excluded_zero_voxel() -> None:
+def test_scale_with_excluded_zero_voxel(prepare_y_mat: PrepareYMat) -> None:
     """Zero voxels excluded from scaling should not affect kept data."""
     y = np.array([[0.0, 1.0, 3.0], [2.0, 5.0, 7.0]])
 
     result = prepare_y_mat(y, "exclude", "scale")
 
-    np.testing.assert_array_equal(result[:, 0], [0.0, 0.0])
-    kept = result[:, 1:]
+    assert result.shape == (2, 2)
+    kept = result
     assert np.mean(kept) == 0.0
     np.testing.assert_allclose(np.std(kept), 1.0)
 
@@ -645,10 +849,15 @@ def test_scale_with_excluded_zero_voxel() -> None:
 
 @pytest.mark.parametrize("zero_opt", ["include", "exclude"])
 @pytest.mark.parametrize("std_opt", ["none", "center", "scale"])
-def test_output_shape_is_preserved(zero_opt: str, std_opt: str) -> None:
-    """Preprocessing should keep the original matrix shape."""
+def test_output_shape_tracks_retained_voxels(
+    zero_opt: str,
+    std_opt: str,
+    prepare_y_mat: PrepareYMat,
+) -> None:
+    """Preserve observations and drop only the excluded voxel columns."""
     y = np.array([[0.0, np.nan, 3.0, 4.0], [2.0, 4.0, 5.0, 6.0]])
 
     result = prepare_y_mat(y, zero_opt, std_opt)
 
-    assert result.shape == (2, 4)
+    expected_columns = 2 if zero_opt == "exclude" else 3
+    assert result.shape == (2, expected_columns)
