@@ -129,14 +129,8 @@ def run_query(  # noqa: PLR0913
         # random_state for reproducibility.
         rng = np.random.default_rng(random_state)
         # Group by subject and pick one index per group
-        # FutureWarning: DataFrameGroupBy.apply operated on the grouping columns
-        # This behavior is deprecated, and in a future version of pandas the
-        # grouping columns will be excluded from the operation.
-        # Either pass `include_groups=False` to exclude the groupings or
-        # explicitly select the grouping columns after groupby to silence this
-        # warning.
-        chosen_idx = (
-            tbl.groupby("subject", sort=False)  # pyright: ignore[reportUnknownMemberType]
+        chosen_idx: np.typing.NDArray[Any] = (
+            tbl.groupby("subject", sort=False)[["session"]]  # pyright: ignore[reportUnknownMemberType]
             .apply(lambda g: rng.choice(g.index))
             .to_numpy()
         )
