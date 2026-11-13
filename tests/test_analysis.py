@@ -476,6 +476,93 @@ def test_run_query_beta_and_t_values(
     )
 
 
+def test_run_query_tfce_with_reduced_masker(tmp_path: Path) -> None:
+    """Run spatial permutation inference after removing an interior voxel."""
+    n_subjects = 12
+    n_perm = 16
+    subjects = [f"{index:02d}" for index in range(n_subjects)]
+    age = np.linspace(20.0, 70.0, n_subjects)
+    rng = np.random.default_rng(42)
+    y = 10.0 + age[:, None] * np.array([0.2, 0.3, -0.4, 0.5])
+    y += rng.normal(size=y.shape)
+    # Only one observation has a zero; the whole interior voxel must be removed.
+    y[0, 1] = 0.0
+    image_data, masker = make_preparation_inputs(y)
+
+    class ImageMetadata:
+        def __init__(self, subject: str, path: Path) -> None:
+            self.subject = subject
+            self.path = str(path)
+
+        def get_entities(self) -> dict[str, str]:
+            return {"sub": self.subject, "ses": "1"}
+
+    images: list[ImageMetadata] = []
+    for subject, image in zip(subjects, image_data, strict=True):
+        path = tmp_path / f"sub-{subject}_ses-1_map.nii.gz"
+        cast("Nifti1Image", image).to_filename(path)  # pyright: ignore[reportUnknownMemberType]
+        images.append(ImageMetadata(subject, path))
+    tbl = pd.DataFrame({"subject": subjects, "session": "1", "age": age})
+
+    result, final_tbl = mod.run_query(
+        query="image ~ age",
+        root=tmp_path,
+        inference_terms={"age"},
+        tbl=tbl,
+        images=images,  # pyright: ignore[reportArgumentType]
+        masker=masker,
+        n_perm=n_perm,
+        n_jobs=1,
+        random_state=42,
+        tfce=True,
+        handle_zero_voxels="exclude",
+        voxelwise_standardization="none",
+    )
+
+    assert len(final_tbl) == n_subjects
+    assert result["tested_var_names"] == ["age"]
+    retained = np.zeros((4, 2, 2), dtype=bool)
+    retained[[0, 2, 3], 0, 0] = True
+    fitted_mask = cast("Nifti1Image", masker.mask_img_)  # pyright: ignore[reportUnknownMemberType]
+    np.testing.assert_array_equal(fitted_mask.get_fdata(), retained)
+    assert masker.n_elements_ == retained.sum()
+
+    # Independently verify column order and t statistics with an OLS reference.
+    design = np.column_stack([np.ones(n_subjects), age])
+    kept_y = y[:, [0, 2, 3]]
+    coefficients, *_ = np.linalg.lstsq(design, kept_y, rcond=None)
+    residuals = kept_y - design @ coefficients
+    residual_variance = np.sum(residuals**2, axis=0) / (n_subjects - 2)
+    slope_variance = residual_variance * np.linalg.inv(design.T @ design)[1, 1]
+    np.testing.assert_allclose(result["beta"], coefficients[1:])
+    np.testing.assert_allclose(
+        result["t"], coefficients[1:] / np.sqrt(slope_variance)
+    )
+
+    assert "tfce" in result
+    assert "logp_max_tfce" in result
+    assert "h0_max_tfce" in result
+    assert result["h0_max_tfce"].shape == (1, n_perm)
+    assert np.isfinite(result["h0_max_tfce"]).all()
+    assert np.all(np.abs(result["tfce"]) > 0)
+    for values in (
+        result["beta"],
+        result["t"],
+        result["tfce"],
+        result["logp_max_t"],
+        result["logp_max_tfce"],
+    ):
+        assert values.shape == (1, 3)
+        assert np.isfinite(values).all()
+        stat_img = cast("Nifti1Image", masker.inverse_transform(values[0]))  # pyright: ignore[reportUnknownMemberType]
+        stat_data = stat_img.get_fdata()
+        assert stat_img.shape == retained.shape
+        assert stat_img.affine is not None
+        np.testing.assert_allclose(stat_img.affine, np.eye(4))
+        np.testing.assert_allclose(stat_data[retained], values[0])
+        np.testing.assert_array_equal(stat_data[~retained], 0)
+
+
 ###############################
 # Tests for prepare_y_mat()
 ###############################
