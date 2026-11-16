@@ -32,6 +32,27 @@ python -m neurovoxel-app
 neurovoxel-app
 ```
 
+### Multiple comparison correction
+
+Choose **FWE** (default) or **FDR** under **Advanced → Multiple comparison
+correction**, or set `analysis.correction` to `"fwe"` or `"fdr"` in a JSON
+configuration file. Existing configurations default to FWE.
+
+FWE uses permutation max-t correction, with optional TFCE. FDR uses
+[Benjamini-Hochberg][bh-fdr]
+correction of two-sided parametric Student t p-values across all retained
+voxels,
+separately for each tested term. As with `permuted_ols`, tested terms are fitted
+independently, adjusting for the non-tested terms and an intercept. Permutation
+count and TFCE are ignored for FDR.
+
+Plots use the selected correction. FDR-adjusted p-value maps are saved as
+`stat-logpfdr_map.nii.gz` (with the imaging outcome and contrast prefixes),
+containing `-log10(adjusted p)`. The selected method is recorded in
+`parameters.json`.
+
+[bh-fdr]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.false_discovery_control.html
+
 ## Contributing
 
 Contributions are very welcome.

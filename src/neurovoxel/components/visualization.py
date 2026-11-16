@@ -33,7 +33,11 @@ def render_visualization(inference_terms: Index) -> None:
             st.session_state.masker,
             bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
             term=variable,
-            p_var="logp_max_t",
+            p_var=(
+                "logp_fdr"
+                if "logp_fdr" in st.session_state.result
+                else "logp_max_t"
+            ),
             p_thresh=p_thresh,
             title=(
                 "Regression coefficient overlay with "

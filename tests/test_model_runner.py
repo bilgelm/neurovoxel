@@ -29,7 +29,7 @@ class FakeSessionState(dict[str, object]):
     ("overrides", "expected_n_jobs", "expected_random_state"),
     [
         ({}, -1, 42),
-        ({"n_jobs": 2, "random_state": 123}, 2, 123),
+        ({"n_jobs": 2, "random_state": 123, "correction": "fdr"}, 2, 123),
     ],
     ids=["default-options", "custom-options"],
 )
@@ -119,6 +119,7 @@ def test_render_model_runner(
     assert args[5] is sentinel.masker
 
     assert kwargs == {
+        "correction": overrides.get("correction", "fwe"),
         "n_perm": 100,
         "n_jobs": expected_n_jobs,
         "random_state": expected_random_state,

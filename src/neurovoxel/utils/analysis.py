@@ -3,7 +3,7 @@
 # pyright: reportMissingTypeStubs=false
 
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,10 @@ from nilearn.maskers import MultiNiftiMasker
 from nilearn.mass_univariate import (
     permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
+from scipy.stats import (
+    false_discovery_control,  # pyright: ignore[reportUnknownVariableType]
+)
+from scipy.stats import t as student_t
 
 from neurovoxel.utils import (
     MULTI_SES_OPTS,
@@ -29,13 +33,14 @@ MIN_N_OBS = 10  # minimum number of observations required for analysis
 
 
 class PermutedOLSResult(TypedDict):
-    """Permuted OLS result dictionary."""
+    """OLS result dictionary with FWE or FDR corrected p-values."""
 
     tested_var_names: list[str]
     beta: np.typing.NDArray[Any]
     t: np.typing.NDArray[Any]
-    logp_max_t: np.typing.NDArray[Any]
-    h0_max_t: np.typing.NDArray[Any]
+    logp_max_t: NotRequired[np.typing.NDArray[Any]]
+    h0_max_t: NotRequired[np.typing.NDArray[Any]]
+    logp_fdr: NotRequired[np.typing.NDArray[Any]]
     tfce: NotRequired[np.typing.NDArray[Any]]
     logp_max_tfce: NotRequired[np.typing.NDArray[Any]]
     h0_max_tfce: NotRequired[np.typing.NDArray[Any]]
@@ -76,8 +81,18 @@ def run_query(  # noqa: PLR0913
     handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     handle_multiple_sessions: str = MULTI_SES_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
+    correction: Literal["fwe", "fdr"] = "fwe",
 ) -> tuple[PermutedOLSResult, pd.DataFrame]:
-    """Run permuted OLS given a query, BIDS dataset, and tabular data file."""
+    """Run OLS with permutation FWE (default) or parametric BH FDR.
+
+    Each tested term is fitted independently, adjusting for the non-tested
+    terms, as in ``permuted_ols``. FDR adjusts two-sided Student t p-values
+    across retained voxels separately for each tested term. Permutations
+    and TFCE are only used for FWE.
+    """
+    if correction not in {"fwe", "fdr"}:
+        msg = f"Unknown multiple comparison correction: {correction}"
+        raise ValueError(msg)
     if "~" not in query:
         msg = "Invalid formula syntax"
         raise ValueError(msg)
@@ -187,20 +202,30 @@ def run_query(  # noqa: PLR0913
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
 
     # ------------------------------
-    # Run permutation-based inference
+    # Compute t-statistics and selected multiple comparison correction
     # ------------------------------
     is_inference_term = x_mat_mm.columns.isin(inference_terms)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
-    res = permuted_ols(  # pyright: ignore[reportUnknownVariableType]
-        tested_vars=x_mat[:, is_inference_term],
-        target_vars=y_mat,  # pyright: ignore[reportUnknownArgumentType]
-        confounding_vars=x_mat[:, ~is_inference_term],
-        n_perm=n_perm,
-        n_jobs=n_jobs,
-        random_state=random_state,
-        masker=masker,
-        tfce=tfce,
-        output_type="dict",
+    res = cast(
+        "PermutedOLSResult",
+        permuted_ols(  # pyright: ignore[reportUnknownVariableType]
+            tested_vars=x_mat[:, is_inference_term],
+            target_vars=y_mat,  # pyright: ignore[reportUnknownArgumentType]
+            confounding_vars=x_mat[:, ~is_inference_term],
+            n_perm=n_perm if correction == "fwe" else 0,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            masker=masker,
+            tfce=tfce if correction == "fwe" else False,
+            output_type="dict",
+        ),
     )
+
+    if correction == "fdr":
+        res["logp_fdr"] = fdr_log_p_values(
+            res["t"],
+            x_mat[:, is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
+            x_mat[:, ~is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
+        )
 
     res["tested_var_names"] = x_mat_mm.columns[is_inference_term].to_list()  # pyright: ignore[reportIndexIssue, reportUnknownMemberType]
 
@@ -209,6 +234,39 @@ def run_query(  # noqa: PLR0913
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
+
+
+def fdr_log_p_values(
+    t_scores: np.typing.NDArray[Any],
+    tested_vars: np.typing.NDArray[Any],
+    confounding_vars: np.typing.NDArray[Any],
+) -> np.typing.NDArray[Any]:
+    """Apply BH across voxels per term using the OLS degrees of freedom.
+
+    The input t-scores must come from independently tested regressors, with
+    the given confounds and an intercept, as returned by ``permuted_ols``.
+    """
+    confounds = np.column_stack(
+        (np.ones(tested_vars.shape[0]), confounding_vars)
+    )
+    degrees_of_freedom = np.array(
+        [
+            tested_vars.shape[0]
+            - np.linalg.matrix_rank(np.column_stack((confounds, term)))
+            for term in tested_vars.T
+        ]
+    )
+    if np.any(degrees_of_freedom <= 0):
+        msg = "FDR inference requires positive residual degrees of freedom"
+        raise ValueError(msg)
+    p_values = 2 * student_t.sf(  # pyright: ignore[reportUnknownMemberType]
+        np.abs(t_scores), degrees_of_freedom[:, np.newaxis]
+    )
+    adjusted_p = cast(
+        "np.typing.NDArray[np.float64]",
+        false_discovery_control(p_values, axis=1, method="bh"),
+    )
+    return -np.log10(np.maximum(adjusted_p, np.finfo(float).tiny))
 
 
 def prepare_y_mat(

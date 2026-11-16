@@ -36,6 +36,7 @@ def render_model_runner(lhs: str) -> None:
             st.session_state.tbl,
             images,  # pyright: ignore[reportUnknownArgumentType]
             st.session_state.masker,
+            correction=st.session_state.analysis.get("correction", "fwe"),
             n_perm=st.session_state.get("analysis", {}).get("n_perm"),
             n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
             random_state=st.session_state.get("analysis", {}).get(

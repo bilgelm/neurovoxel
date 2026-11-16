@@ -7,7 +7,7 @@ from typing import Literal
 import pandas as pd
 import streamlit as st
 
-from neurovoxel.utils import MULTI_SES_OPTS, ZERO_VOXEL_OPTS
+from neurovoxel.utils import CORRECTION_OPTS, MULTI_SES_OPTS, ZERO_VOXEL_OPTS
 from neurovoxel.utils.analysis import STANDARDIZATION_OPTS
 
 
@@ -164,6 +164,19 @@ def render_analysis_param_input() -> None:
         key="voxel_size_input",
     )
 
+    st.session_state.analysis["correction"] = st.selectbox(
+        "Multiple comparison correction",
+        CORRECTION_OPTS,
+        index=CORRECTION_OPTS.index(
+            st.session_state.analysis.get("correction", "fwe")
+        ),
+        format_func=str.upper,
+        help="FWE: permutation max-t. FDR: Benjamini-Hochberg across voxels "
+        "for each tested term, using two-sided parametric OLS p-values.",
+        key="correction_input",
+    )
+    use_fdr = st.session_state.analysis["correction"] == "fdr"
+
     st.session_state.analysis["n_perm"] = st.number_input(
         "Number of permutations",
         min_value=0,
@@ -171,12 +184,14 @@ def render_analysis_param_input() -> None:
         value=st.session_state.get("analysis", {}).get("n_perm", 10000),
         step=1,
         key="n_perm_input",
+        disabled=use_fdr,
     )
 
     st.session_state.analysis["tfce"] = st.checkbox(
         "Run TFCE",
         value=st.session_state.get("analysis", {}).get("tfce", False),
         key="tfce_input",
+        disabled=use_fdr,
     )
 
     st.session_state.analysis["handle_zero_voxels"] = st.selectbox(

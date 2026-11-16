@@ -9,12 +9,14 @@ import pytest
 import neurovoxel.components.visualization as mod
 
 
+@pytest.mark.parametrize("correction", ["fwe", "fdr"])
 @pytest.mark.parametrize("template", ["/data/template.nii.gz", None])
 def test_render_visualization(
-    monkeypatch: pytest.MonkeyPatch, template: str | None
+    monkeypatch: pytest.MonkeyPatch, template: str | None, correction: str
 ) -> None:
     """Test rendering visualization with and without a template."""
-    result = object()
+    p_var = "logp_fdr" if correction == "fdr" else "logp_max_t"
+    result = {p_var: object()}
     masker = object()
     paths = {"template": template} if template else {}
 
@@ -70,7 +72,7 @@ def test_render_visualization(
             masker,
             bg_img=template,
             term=term,
-            p_var="logp_max_t",
+            p_var=p_var,
             p_thresh=0.01,
             title=(
                 "Regression coefficient overlay with "

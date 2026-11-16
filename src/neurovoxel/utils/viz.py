@@ -32,6 +32,7 @@ STAT_OPTIONS_LITERAL = Literal[
 STAT_OPTIONS = get_args(STAT_OPTIONS_LITERAL)
 
 P_OPTIONS_LITERAL = Literal[
+    "logp_fdr",  # -log10 Benjamini-Hochberg FDR-adjusted p-values
     "logp_max_t",  # -log10 family-wise corrected p-values
     "logp_max_tfce",  # -log10 family-wise corrected p-values
     "logp_max_size",  # -log10 family-wise corrected cluster-level p-values
