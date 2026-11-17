@@ -70,6 +70,8 @@ def test_unsupported_formula(query: str) -> None:
         ("gm ~ age + (0 + age | subject)", True, False),
         ("gm ~ 0 + age + (0 + age | subject)", False, False),
         ("gm ~ age - 1 + (age - 1 | subject)", False, False),
+        ("gm ~ age + (age | subject) - 1", False, True),
+        ("gm ~ (age | subject) - 1 + age", False, True),
     ],
 )
 def test_fixed_and_random_intercepts(
@@ -94,3 +96,30 @@ def test_fixed_and_random_intercepts(
         )
         if include_intercept:
             assert (actual["Intercept"] == 1).all()
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "gm ~ age - 1 + (1 | subject)",
+        "gm ~ age + (1 | subject) - 1",
+        "gm ~ (1 | subject) - 1 + age",
+        "gm~age+(1|subject)-1",
+    ],
+)
+def test_intercept_removal_independent_of_random_term_order(query: str) -> None:
+    """Remove the fixed intercept while retaining the random intercept."""
+    data = pd.DataFrame(
+        {"age": [50.0, 51.0, 60.0, 61.0], "subject": ["a", "a", "b", "b"]}
+    )
+    formula = split_formula(query)
+    assert formula.group == "subject"
+    assert formula.random is not None
+    fixed = cast("pd.DataFrame", model_matrix(formula.fixed, data))
+    random = cast("pd.DataFrame", model_matrix(formula.random, data))
+    pd.testing.assert_frame_equal(
+        fixed, cast("pd.DataFrame", model_matrix("0 + age", data))
+    )
+    pd.testing.assert_frame_equal(
+        random, cast("pd.DataFrame", model_matrix("1", data))
+    )

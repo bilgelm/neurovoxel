@@ -66,7 +66,7 @@ def split_formula(query: str) -> ModelFormula:  # noqa: C901, PLR0912
     before = rhs[: opening.source_start].strip()
     after = rhs[closing.source_end + 1 :].strip()
     if (before and not before.endswith("+")) or (
-        after and not after.startswith("+")
+        after and not after.startswith(("+", "-"))
     ):
         raise ValueError(msg)
     fixed = (before.removesuffix("+") + after).strip().removeprefix("+")
