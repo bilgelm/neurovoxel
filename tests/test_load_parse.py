@@ -176,3 +176,13 @@ def test_config_correction(
         assert (
             mod.load_config(config_file)["analysis"]["correction"] == correction
         )
+
+
+def test_parse_mixed_query_only_offers_fixed_effects(
+    tabular: pd.DataFrame,
+) -> None:
+    """Grouping variables and random slopes are not fixed-effect contrasts."""
+    tbl = tabular.assign(id="one", time=1.0)
+    lhs, columns = mod.parse_query("T1w ~ age + (1 + time | id)", ["T1w"], tbl)
+    assert lhs == "T1w"
+    assert list(columns) == ["Intercept", "age"]

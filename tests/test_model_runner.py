@@ -30,8 +30,9 @@ class FakeSessionState(dict[str, object]):
     [
         ({}, -1, 42),
         ({"n_jobs": 2, "random_state": 123, "correction": "fdr"}, 2, 123),
+        ({"query": "gm ~ age + (age | subject)", "correction": "fdr"}, -1, 42),
     ],
-    ids=["default-options", "custom-options"],
+    ids=["default-options", "custom-options", "mixed-preparation-progress"],
 )
 def test_render_model_runner(
     monkeypatch: pytest.MonkeyPatch,
@@ -87,9 +88,20 @@ def test_render_model_runner(
     )
 
     spinner = MagicMock()
-    fake_st = SimpleNamespace(session_state=state, spinner=spinner)
+    fake_st = SimpleNamespace(
+        session_state=state, spinner=spinner, progress=Mock()
+    )
 
-    get_masker = Mock(return_value=sentinel.masker)
+    mixed = "|" in str(analysis["query"])
+
+    def prepare_masker(*_args: object, **_kwargs: object) -> object:
+        # The progress widget must exist before preprocessing starts, even
+        # when no voxel-fitting callback has fired yet.
+        if mixed:
+            fake_st.progress.assert_called_once()
+        return sentinel.masker
+
+    get_masker = Mock(side_effect=prepare_masker)
     run_query = Mock(return_value=(sentinel.result, output_tbl))
 
     monkeypatch.setattr(mod, "st", fake_st)
@@ -111,15 +123,26 @@ def test_render_model_runner(
     run_query.assert_called_once()
     args, kwargs = run_query.call_args
 
-    assert args[0] == "gm ~ age"
+    assert args[0] == analysis["query"]
     assert args[1] == tmp_path
     assert args[2] == ["age"]
     assert args[3] is input_tbl
     assert args[4] is images
     assert args[5] is sentinel.masker
 
+    assert callable(kwargs.pop("progress_callback"))
+    if mixed:
+        fake_st.progress.assert_called_once_with(
+            0.0,
+            text="Preparing LME data: matching images, loading and "
+            "preprocessing...",
+        )
+        fake_st.progress.return_value.empty.assert_called_once_with()
+    else:
+        fake_st.progress.assert_not_called()
     assert kwargs == {
         "correction": overrides.get("correction", "fwe"),
+        "voxelwise_standardization": mod.STANDARDIZATION_OPTS[0],
         "n_perm": 100,
         "n_jobs": expected_n_jobs,
         "random_state": expected_random_state,
@@ -137,3 +160,52 @@ def test_render_model_runner(
     spinner.assert_called_once_with("Running analysis...")
     spinner.return_value.__enter__.assert_called_once()
     spinner.return_value.__exit__.assert_called_once()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_lme_progress_updates_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch, fail: bool
+) -> None:
+    """Throttle intermediate updates, always finish, and clear on exceptions."""
+    fake_st = Mock()
+    monkeypatch.setattr(mod, "st", fake_st)
+    monkeypatch.setattr(mod, "monotonic", lambda: 10.0)
+
+    def run() -> None:
+        with mod._lme_progress() as update:  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+            update(0, 2)
+            update(1, 2)
+            if fail:
+                msg = "Fit interrupted"
+                raise RuntimeError(msg)
+            update(2, 2)
+
+    if fail:
+        with pytest.raises(RuntimeError, match="Fit interrupted"):
+            run()
+        fake_st.progress.return_value.progress.assert_not_called()
+    else:
+        run()
+        fake_st.progress.return_value.progress.assert_called_once_with(
+            1.0, text="Fitting LME: 2/2 voxels (100%)"
+        )
+    fake_st.progress.assert_called_once_with(
+        0.0, text="Fitting LME: 0/2 voxels (0%)"
+    )
+    fake_st.progress.return_value.empty.assert_called_once_with()
+
+
+def test_preparation_progress_switches_immediately_to_fitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not throttle away the first fitting update after preparation."""
+    fake_st = Mock()
+    monkeypatch.setattr(mod, "st", fake_st)
+    monkeypatch.setattr(mod, "monotonic", lambda: 0.0)
+    with mod._lme_progress(prepare=True) as update:  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+        fake_st.progress.assert_called_once()
+        update(0, 10)
+        fake_st.progress.return_value.progress.assert_called_once_with(
+            0.0, text="Fitting LME: 0/10 voxels (0%)"
+        )
+    fake_st.progress.return_value.empty.assert_called_once_with()

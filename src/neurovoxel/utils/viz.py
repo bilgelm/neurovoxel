@@ -24,6 +24,8 @@ from neurovoxel.utils.analysis import PermutedOLSResult
 # see: https://nilearn.github.io/stable/modules/generated/nilearn.mass_univariate.permuted_ols.html # noqa: E501
 STAT_OPTIONS_LITERAL = Literal[
     "beta",  # regression coefficient
+    "z",  # mixed-effects Wald z-statistic
+    "converged",  # mixed-effects fit/inference success (0 or 1)
     "t",  # t-statistic associated with the significance test
     "tfce",  # TFCE values associated with the significance test
     "size",  # cluster size values associated with the significance test

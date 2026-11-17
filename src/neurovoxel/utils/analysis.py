@@ -2,8 +2,9 @@
 
 # pyright: reportMissingTypeStubs=false
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -18,9 +19,6 @@ from nilearn.maskers import MultiNiftiMasker
 from nilearn.mass_univariate import (
     permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
-from scipy.stats import (
-    false_discovery_control,  # pyright: ignore[reportUnknownVariableType]
-)
 from scipy.stats import t as student_t
 
 from neurovoxel.utils import (
@@ -28,28 +26,15 @@ from neurovoxel.utils import (
     STANDARDIZATION_OPTS,
     ZERO_VOXEL_OPTS,
 )
+from neurovoxel.utils.formula import split_formula
+from neurovoxel.utils.inference import fdr_log_p_values
+from neurovoxel.utils.mixed import fit_mixed_model
+from neurovoxel.utils.results import (
+    AnalysisResult,
+    PermutedOLSResult,
+)
 
 MIN_N_OBS = 10  # minimum number of observations required for analysis
-
-
-class PermutedOLSResult(TypedDict):
-    """OLS result dictionary with FWE or FDR corrected p-values."""
-
-    tested_var_names: list[str]
-    beta: np.typing.NDArray[Any]
-    t: np.typing.NDArray[Any]
-    logp_max_t: NotRequired[np.typing.NDArray[Any]]
-    h0_max_t: NotRequired[np.typing.NDArray[Any]]
-    logp_fdr: NotRequired[np.typing.NDArray[Any]]
-    tfce: NotRequired[np.typing.NDArray[Any]]
-    logp_max_tfce: NotRequired[np.typing.NDArray[Any]]
-    h0_max_tfce: NotRequired[np.typing.NDArray[Any]]
-    size: NotRequired[np.typing.NDArray[Any]]
-    logp_max_size: NotRequired[np.typing.NDArray[Any]]
-    h0_max_size: NotRequired[np.typing.NDArray[Any]]
-    mass: NotRequired[np.typing.NDArray[Any]]
-    logp_max_mass: NotRequired[np.typing.NDArray[Any]]
-    h0_max_mass: NotRequired[np.typing.NDArray[Any]]
 
 
 def get_masker(
@@ -64,6 +49,8 @@ def get_masker(
         smoothing_fwhm=smoothing_fwhm,
         target_affine=np.eye(3) * vox_size,
         n_jobs=n_jobs,
+        # Reports build preview images that are not used by NeuroVoxel.
+        reports=False,
     )
 
 
@@ -82,29 +69,37 @@ def run_query(  # noqa: PLR0913
     handle_multiple_sessions: str = MULTI_SES_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     correction: Literal["fwe", "fdr"] = "fwe",
-) -> tuple[PermutedOLSResult, pd.DataFrame]:
-    """Run OLS with permutation FWE (default) or parametric BH FDR.
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[AnalysisResult, pd.DataFrame]:
+    """Run ordinary or longitudinal mixed-effects regression voxelwise.
 
-    Each tested term is fitted independently, adjusting for the non-tested
+    For OLS, each tested term is fitted independently, adjusting for non-tested
     terms, as in ``permuted_ols``. FDR adjusts two-sided Student t p-values
     across retained voxels separately for each tested term. Permutations
-    and TFCE are only used for FWE.
+    and TFCE are only used for OLS FWE. Mixed formulas retain all sessions,
+    fit fixed effects jointly, and apply FDR to asymptotic Wald p-values.
+    ``progress_callback`` receives completed/total voxel counts for mixed fits.
     """
     if correction not in {"fwe", "fdr"}:
         msg = f"Unknown multiple comparison correction: {correction}"
         raise ValueError(msg)
-    if "~" not in query:
-        msg = "Invalid formula syntax"
+    formula = split_formula(query)
+    if formula.random is not None and correction != "fdr":
+        msg = "Mixed-effects models require FDR correction (correction='fdr')"
         raise ValueError(msg)
 
-    tbl_vars: set[str] = Formula(query).rhs.required_variables  # pyright: ignore[reportUnknownVariableType, reportAbstractUsage, reportUnknownMemberType, reportAttributeAccessIssue]
+    tbl_vars: set[str] = cast("Any", Formula)(
+        f"{formula.lhs} ~ {formula.fixed}"
+    ).rhs.required_variables
     # verify that each inference_term is in tbl_vars
 
     tbl_vars.update(["subject", "session"])  # pyright: ignore[reportUnknownMemberType]
 
-    lhs, rhs = query.split("~")
-    lhs = lhs.strip()
-    rhs = rhs.strip()
+    lhs, rhs = formula.lhs, formula.fixed
+    if formula.random is not None:
+        assert formula.group is not None  # noqa: S101
+        tbl_vars.update(cast("Any", Formula)(formula.random).required_variables)
+        tbl_vars.add(formula.group)
 
     image_df = pd.DataFrame()
     for index, image in enumerate(images):
@@ -132,33 +127,8 @@ def run_query(  # noqa: PLR0913
     # a better implementation would be to take missingness into account.
     # to do this, we need a function that can take in RHS and return the
     # names of variables.
-    if handle_multiple_sessions in ["first", "last"]:
-        # Keep only the first/last row for each subject
-        # (e.g., first/last session per subject)
-        tbl = tbl.drop_duplicates(
-            subset=["subject"],
-            keep=handle_multiple_sessions,  # type: ignore[arg-type]
-        ).reset_index(drop=True)
-    elif handle_multiple_sessions == "random":
-        # For each subject, sample a single row at random. Use the provided
-        # random_state for reproducibility.
-        rng = np.random.default_rng(random_state)
-        # Group by subject and pick one index per group
-        chosen_idx: np.typing.NDArray[Any] = (
-            tbl.groupby("subject", sort=False)[["session"]]  # pyright: ignore[reportUnknownMemberType]
-            .apply(lambda g: rng.choice(g.index))
-            .to_numpy()
-        )
-        tbl = tbl.loc[chosen_idx].reset_index(drop=True)
-    elif handle_multiple_sessions == "all":
-        # Do nothing, keep all visits
-        pass
-    else:
-        msg = (
-            f"{handle_multiple_sessions} is not a recognized option for "
-            "handling multiple visits per subject"
-        )
-        raise ValueError(msg)
+    if formula.random is None:
+        tbl = select_sessions(tbl, handle_multiple_sessions, random_state)
 
     # bring subject and session columns to the front
     tbl = tbl[
@@ -194,6 +164,18 @@ def run_query(  # noqa: PLR0913
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
 
+    if formula.random is not None:
+        return fit_mixed_model(
+            formula,
+            tbl,
+            y_mat,
+            valid_rows,
+            inference_terms,
+            n_jobs,
+            min_observations=MIN_N_OBS,
+            progress_callback=progress_callback,
+        )
+
     # ------------------------------
     # Compute OLS beta coefficients
     # ------------------------------
@@ -221,10 +203,13 @@ def run_query(  # noqa: PLR0913
     )
 
     if correction == "fdr":
+        assert "t" in res  # noqa: S101
         res["logp_fdr"] = fdr_log_p_values(
-            res["t"],
-            x_mat[:, is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
-            x_mat[:, ~is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
+            ols_p_values(
+                res["t"],
+                x_mat[:, is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
+                x_mat[:, ~is_inference_term],  # pyright: ignore[reportUnknownArgumentType]
+            )
         )
 
     res["tested_var_names"] = x_mat_mm.columns[is_inference_term].to_list()  # pyright: ignore[reportIndexIssue, reportUnknownMemberType]
@@ -236,12 +221,46 @@ def run_query(  # noqa: PLR0913
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
 
 
-def fdr_log_p_values(
+def select_sessions(
+    tbl: pd.DataFrame, handle_multiple_sessions: str, random_state: int
+) -> pd.DataFrame:
+    """Select cross-sectional observations for ordinary linear regression."""
+    if handle_multiple_sessions in ["first", "last"]:
+        # Keep only the first/last row for each subject
+        # (e.g., first/last session per subject)
+        tbl = tbl.drop_duplicates(
+            subset=["subject"],
+            keep=handle_multiple_sessions,  # type: ignore[arg-type]
+        ).reset_index(drop=True)
+    elif handle_multiple_sessions == "random":
+        # For each subject, sample a single row at random. Use the provided
+        # random_state for reproducibility.
+        rng = np.random.default_rng(random_state)
+        # Group by subject and pick one index per group
+        chosen_idx: np.typing.NDArray[Any] = (
+            tbl.groupby("subject", sort=False)[["session"]]  # pyright: ignore[reportUnknownMemberType]
+            .apply(lambda g: rng.choice(g.index))
+            .to_numpy()
+        )
+        tbl = tbl.loc[chosen_idx].reset_index(drop=True)
+    elif handle_multiple_sessions == "all":
+        # Do nothing, keep all visits
+        pass
+    else:
+        msg = (
+            f"{handle_multiple_sessions} is not a recognized option for "
+            "handling multiple visits per subject"
+        )
+        raise ValueError(msg)
+    return tbl
+
+
+def ols_p_values(
     t_scores: np.typing.NDArray[Any],
     tested_vars: np.typing.NDArray[Any],
     confounding_vars: np.typing.NDArray[Any],
 ) -> np.typing.NDArray[Any]:
-    """Apply BH across voxels per term using the OLS degrees of freedom.
+    """Compute two-sided OLS p-values using residual degrees of freedom.
 
     The input t-scores must come from independently tested regressors, with
     the given confounds and an intercept, as returned by ``permuted_ols``.
@@ -259,14 +278,9 @@ def fdr_log_p_values(
     if np.any(degrees_of_freedom <= 0):
         msg = "FDR inference requires positive residual degrees of freedom"
         raise ValueError(msg)
-    p_values = 2 * student_t.sf(  # pyright: ignore[reportUnknownMemberType]
+    return 2 * student_t.sf(  # pyright: ignore[reportUnknownMemberType]
         np.abs(t_scores), degrees_of_freedom[:, np.newaxis]
     )
-    adjusted_p = cast(
-        "np.typing.NDArray[np.float64]",
-        false_discovery_control(p_values, axis=1, method="bh"),
-    )
-    return -np.log10(np.maximum(adjusted_p, np.finfo(float).tiny))
 
 
 def prepare_y_mat(

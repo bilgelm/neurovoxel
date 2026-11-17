@@ -451,13 +451,15 @@ def test_save_all_maps_without_statistics(
     save_mock.assert_not_called()
 
 
-def test_save_fdr_map(tmp_path: Path) -> None:
+@pytest.mark.parametrize("stat", ["logp_fdr", "z", "converged"])
+def test_save_fdr_map(tmp_path: Path, stat: str) -> None:
     """Save corrected voxel values with the FDR statistic in the filename."""
     mask = Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4))
     masker = MultiNiftiMasker(mask_img=mask).fit()  # pyright: ignore[reportUnknownMemberType]
     logp = np.arange(8, dtype=float)[None, :]
-    result = {"tested_var_names": np.array(["age"]), "logp_fdr": logp}
+    result = {"tested_var_names": np.array(["age"]), stat: logp}
     names = mod.save_all_maps(tmp_path, result, masker, "gm")
-    assert names == ["gm_contrast-age_stat-logpfdr_map.nii.gz"]
+    name = stat.replace("_", "")
+    assert names == [f"gm_contrast-age_stat-{name}_map.nii.gz"]
     saved = cast("Nifti1Image", load(tmp_path / names[0]))
     np.testing.assert_array_equal(saved.get_fdata().ravel(), logp[0])

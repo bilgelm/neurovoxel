@@ -9,6 +9,7 @@ import streamlit as st
 
 from neurovoxel.utils import CORRECTION_OPTS, MULTI_SES_OPTS, ZERO_VOXEL_OPTS
 from neurovoxel.utils.analysis import STANDARDIZATION_OPTS
+from neurovoxel.utils.formula import split_formula
 
 
 def render_bids_input(autoload: bool = False) -> bool:
@@ -164,6 +165,23 @@ def render_analysis_param_input() -> None:
         key="voxel_size_input",
     )
 
+    query = st.session_state.get(
+        "query_input", st.session_state.analysis.get("query", "")
+    )
+    try:
+        mixed = split_formula(query).random is not None if query else False
+    except ValueError:
+        mixed = False
+    if mixed:
+        st.session_state.analysis["correction"] = "fdr"
+        st.session_state["correction_input"] = "fdr"
+        st.session_state.analysis["handle_multiple_sessions"] = "all"
+        st.session_state["handle_multiple_sessions_input"] = "all"
+        st.info(
+            "Mixed-effects model: all sessions are retained. Fixed-effect "
+            "Wald z-tests use FDR correction across voxels."
+        )
+
     st.session_state.analysis["correction"] = st.selectbox(
         "Multiple comparison correction",
         CORRECTION_OPTS,
@@ -172,8 +190,9 @@ def render_analysis_param_input() -> None:
         ),
         format_func=str.upper,
         help="FWE: permutation max-t. FDR: Benjamini-Hochberg across voxels "
-        "for each tested term, using two-sided parametric OLS p-values.",
+        "for each tested term, using two-sided model p-values.",
         key="correction_input",
+        disabled=mixed,
     )
     use_fdr = st.session_state.analysis["correction"] == "fdr"
 
@@ -215,9 +234,13 @@ def render_analysis_param_input() -> None:
             )
         ),
         key="handle_multiple_sessions_input",
+        disabled=mixed,
     )
     # Warn if user selects "all" about violation of independence of observations
-    if st.session_state.analysis.get("handle_multiple_sessions") == "all":
+    if (
+        not mixed
+        and st.session_state.analysis.get("handle_multiple_sessions") == "all"
+    ):
         st.warning(
             "Selecting 'all' sessions may violate the independence of "
             "observations assumption for linear regression. "

@@ -15,14 +15,15 @@ from neurovoxel.utils.viz import (
 def render_visualization(inference_terms: Index) -> None:
     """Render the visualization UI for NeuroVoxel app."""
     for variable in inference_terms:  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+        stat = "z" if "z" in st.session_state.result else "t"
         html_view = basic_interactive_viz(
             st.session_state.result,
             st.session_state.masker,
             term=variable,
-            stat="t",
+            stat=stat,
             bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
             opacity=0.5,  # pyright: ignore[reportArgumentType]
-            title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+            title=f"{stat}-stat for {variable}",  # pyright: ignore[reportArgumentType]
         )
         html_content = html_view.get_iframe()  # pyright: ignore[reportUnknownMemberType]
         st.components.v1.html(html_content, width=650, height=250)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]

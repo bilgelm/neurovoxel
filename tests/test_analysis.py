@@ -53,6 +53,7 @@ def test_get_masker_passes_arguments_to_masker(
     assert calls.args == (mask_img,)
     assert calls.kwargs["smoothing_fwhm"] == SMOOTHING_FWHM
     assert calls.kwargs["n_jobs"] == n_jobs
+    assert calls.kwargs["reports"] is False
     np.testing.assert_array_equal(
         calls.kwargs["target_affine"], np.eye(3) * vox_size
     )
@@ -537,6 +538,7 @@ def test_run_query_tfce_with_reduced_masker(tmp_path: Path) -> None:
     residuals = kept_y - design @ coefficients
     residual_variance = np.sum(residuals**2, axis=0) / (n_subjects - 2)
     slope_variance = residual_variance * np.linalg.inv(design.T @ design)[1, 1]
+    assert "t" in result
     np.testing.assert_allclose(result["beta"], coefficients[1:])
     np.testing.assert_allclose(
         result["t"], coefficients[1:] / np.sqrt(slope_variance)
@@ -926,6 +928,7 @@ def test_fdr_matches_independent_ols_and_bh(
     )
     assert "logp_max_t" not in result
     assert "tfce" not in result
+    assert "t" in result
     assert "logp_fdr" in result
     assert np.isfinite(result["logp_fdr"]).all()
     for i, term in enumerate(result["tested_var_names"]):
@@ -981,7 +984,9 @@ def test_fdr_finite_for_zero_p_and_no_effect() -> None:
     """Bound log p-values when the t tail underflows and retain p=1."""
     tested = np.arange(20, dtype=float)[:, None]
     actual = mod.fdr_log_p_values(
-        np.array([[0.0, 1e100, -1e100]]), tested, np.ones((20, 1))
+        mod.ols_p_values(
+            np.array([[0.0, 1e100, -1e100]]), tested, np.ones((20, 1))
+        )
     )
     assert np.isfinite(actual).all()
     assert actual[0, 0] == 0
@@ -993,4 +998,24 @@ def test_fdr_requires_residual_degrees_of_freedom() -> None:
     with pytest.raises(
         ValueError, match="positive residual degrees of freedom"
     ):
-        mod.fdr_log_p_values(np.ones((1, 2)), np.ones((3, 1)), np.eye(3))
+        mod.ols_p_values(np.ones((1, 2)), np.ones((3, 1)), np.eye(3))
+
+
+def test_masking_skips_unused_report_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not load or resample a preview before extracting voxel data."""
+    y = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    images, reference = make_preparation_inputs(y)
+    masker = mod.get_masker(reference.mask_img, 0.0, 1.0, 1)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+
+    def unexpected_preview(*_args: object) -> None:
+        msg = "Unused Nilearn report preview should not be generated"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "nilearn.maskers.multi_nifti_masker.compute_middle_image",
+        unexpected_preview,
+    )
+    actual = mod.prepare_y_mat(images, masker, "keep", "none")
+    np.testing.assert_allclose(actual, y)

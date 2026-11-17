@@ -51,6 +51,41 @@ Plots use the selected correction. FDR-adjusted p-value maps are saved as
 containing `-log10(adjusted p)`. The selected method is recorded in
 `parameters.json`.
 
+### Longitudinal mixed-effects models
+
+Add a random-effects term to the query:
+
+```text
+gm ~ age + sex + (1 + age | subject)
+```
+
+This fits a random intercept and age slope for each subject, with an estimated
+covariance between them. Use `(1 | subject)` for a random intercept or
+`(0 + age | subject)` for a random slope without a random intercept. The grouping
+column can have another name, such as `id`, provided it exists in the table.
+One grouping column and one random-effects term are currently supported;
+multiple, nested, crossed, and `||` structures are rejected.
+
+Mixed models automatically retain all sessions in the app. Missing fixed or
+random covariates and missing group labels are excluded together. All fixed
+effects are fitted jointly using Statsmodels `MixedLM` with REML; the inference
+checkboxes select which fixed effects to report. The app selects FDR and
+disables permutation controls. When calling `run_query` directly, use
+`correction="fdr"`; permutation FWE for mixed models is not supported.
+
+Mixed-model inference uses two-sided asymptotic Wald z-tests, without
+small-sample Satterthwaite or Kenward-Roger adjustments. Their uncorrected
+p-values use the
+same Benjamini-Hochberg correction across voxels per reported term as OLS.
+Plots and exports include fixed-effect beta, z, FDR and convergence maps.
+Convergence maps contain 1 for successful inference and 0 for failures; failed
+voxels have NaN beta/z and p=1 before FDR. A run stops if every voxel fails.
+Numerical warnings are summarized in a warning. Voxelwise mixed fitting can be
+slow; `analysis.n_jobs` controls parallel fitting. A progress bar appears
+immediately while images are prepared, then reports completed voxel fits,
+including unsuccessful fits. Estimates of random effects
+are fitted separately at each voxel and are not exported.
+
 [bh-fdr]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.false_discovery_control.html
 
 ## Contributing

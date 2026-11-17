@@ -9,14 +9,18 @@ import pytest
 import neurovoxel.components.visualization as mod
 
 
+@pytest.mark.parametrize("stat", ["t", "z"])
 @pytest.mark.parametrize("correction", ["fwe", "fdr"])
 @pytest.mark.parametrize("template", ["/data/template.nii.gz", None])
 def test_render_visualization(
-    monkeypatch: pytest.MonkeyPatch, template: str | None, correction: str
+    monkeypatch: pytest.MonkeyPatch,
+    template: str | None,
+    correction: str,
+    stat: str,
 ) -> None:
     """Test rendering visualization with and without a template."""
     p_var = "logp_fdr" if correction == "fdr" else "logp_max_t"
-    result = {p_var: object()}
+    result = {p_var: object(), stat: object()}
     masker = object()
     paths = {"template": template} if template else {}
 
@@ -50,10 +54,10 @@ def test_render_visualization(
             result,
             masker,
             term=term,
-            stat="t",
+            stat=stat,
             bg_img=template,
             opacity=0.5,
-            title=f"t-stat for {term}",
+            title=f"{stat}-stat for {term}",
         )
         for term in terms
     ]
