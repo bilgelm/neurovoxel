@@ -18,6 +18,7 @@ from nilearn.maskers import MultiNiftiMasker
 from nilearn.mass_univariate import (
     permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
+from scipy.stats import f
 
 from neurovoxel.utils import (
     MULTI_SES_OPTS,
@@ -47,6 +48,7 @@ class PermutedOLSResult(TypedDict):
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
     r_square: np.typing.NDArray[Any]
     f_stat: np.typing.NDArray[Any]
+    f_pvalues: np.typing.NDArray[Any]
 
 
 def get_masker(
@@ -204,6 +206,11 @@ def run_query(  # noqa: PLR0913, PLR0915
 
     f_statistic_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
     f_stat = np.asarray(f_statistic_results.F).ravel()
+    df_num = f_statistic_results.df_num  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType] # Numerator degrees of freedom
+    df_den = f_statistic_results.df_den  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType] # Denominator degrees of freedom
+
+    # 4. Compute the p-values using SciPy's survival function (1 - CDF)
+    f_pvalues = f.sf(f_stat, df_num, df_den)  # pyright: ignore[reportUnknownMemberType]
 
     # ------------------------------
     # Run permutation-based inference
@@ -227,6 +234,7 @@ def run_query(  # noqa: PLR0913, PLR0915
     res["beta"] = beta_coef[is_inference_term, :]  # pyright: ignore[reportIndexIssue]
     res["r_square"] = r_square_results  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
     res["f_stat"] = f_stat  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_pvalues"] = f_pvalues  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]

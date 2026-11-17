@@ -126,7 +126,11 @@ def test_run_query_aligns_rows_and_selects_inference_term(  # noqa: C901
 
             def fake_fcontrast(contrast: object) -> SimpleNamespace:
                 np.testing.assert_array_equal(contrast, [[0, 1]])
-                return SimpleNamespace(F=np.array([2.0, 3.0]))
+                return SimpleNamespace(
+                    F=np.array([2.0, 3.0]),
+                    df_num=1,
+                    df_den=10,
+                )
 
             return SimpleNamespace(
                 theta=np.array(
@@ -279,7 +283,11 @@ def test_run_query_selects_session(  # noqa: C901 # still don't fully understand
         def fit(self, y: np.ndarray) -> SimpleNamespace:  # noqa: ARG002
             def fake_fcontrast(contrast: object) -> SimpleNamespace:
                 np.testing.assert_array_equal(contrast, [[0, 1]])
-                return SimpleNamespace(F=np.array([2.0, 3.0]))
+                return SimpleNamespace(
+                    F=np.array([2.0, 3.0]),
+                    df_num=1,
+                    df_den=10,
+                )
 
             return SimpleNamespace(
                 theta=np.zeros((2, 2)),

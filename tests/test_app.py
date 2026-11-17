@@ -381,6 +381,7 @@ def test_main_success(
     mocked_st.session_state.result = {
         "r_square": np.array([0.25, 0.75], dtype=np.float64),
         "f_stat": np.array([2.0, 3.0], dtype=np.float64),
+        "f_pvalues": np.array([0.1, 0.05], dtype=np.float64),
     }
 
     mod.main(

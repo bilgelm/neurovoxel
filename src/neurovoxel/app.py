@@ -199,6 +199,10 @@ def main(
                 "array": st.session_state.result["f_stat"],
                 "vmax": float(np.nanmax(st.session_state.result["f_stat"])),
             },
+            "f_pvalues": {
+                "array": st.session_state.result["f_pvalues"],
+                "vmax": 1.0,
+            },
         }
         if valid_outputdir:
             generate_ols_results_pdf(
