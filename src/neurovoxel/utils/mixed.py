@@ -21,6 +21,11 @@ from statsmodels.regression.mixed_linear_model import MixedLM
 
 from neurovoxel.utils.formula import ModelFormula
 from neurovoxel.utils.inference import fdr_log_p_values
+from neurovoxel.utils.longitudinal import (
+    LONGITUDINAL_TERMS,
+    add_longitudinal_terms,
+    longitudinal_dependencies,
+)
 from neurovoxel.utils.results import AnalysisResult
 
 type VoxelFit = tuple[
@@ -111,6 +116,54 @@ class MixedDesign:
     selected: np.typing.NDArray[np.bool_]
 
 
+def _complete_mixed_matrices(
+    formula: ModelFormula, tbl: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Recompute baselines until no further model-based exclusions remain."""
+    assert formula.random is not None  # noqa: S101
+    assert formula.group is not None  # noqa: S101
+    required: set[str] = (
+        cast("Any", Formula)(formula.fixed).required_variables
+        | cast("Any", Formula)(formula.random).required_variables
+        | {formula.group}
+    )
+    derived = bool(required & LONGITUDINAL_TERMS)
+    required = longitudinal_dependencies(required, tbl)
+    if derived:
+        # An incomplete earlier visit must not determine any subject's baseline.
+        tbl = tbl.loc[tbl[list(required)].notna().all(axis=1)].copy()
+    if tbl.empty:
+        msg = "Insufficient observations for mixed-effects inference"
+        raise ValueError(msg)
+    while True:
+        if derived:
+            tbl = add_longitudinal_terms(tbl)
+        fixed = cast(
+            "pd.DataFrame", model_matrix(formula.fixed, tbl, na_action="ignore")
+        )
+        random = cast(
+            "pd.DataFrame",
+            model_matrix(formula.random, tbl, na_action="ignore"),
+        )
+        # Source checks also catch missing categoricals encoded as zero dummies.
+        valid = (
+            np.asarray(tbl[list(required)].notna().all(axis=1))
+            & ~np.asarray(fixed.isna().any(axis=1))
+            & ~np.asarray(random.isna().any(axis=1))
+            & np.asarray(tbl[formula.group].notna())
+        )
+        retained = tbl.loc[valid].reset_index(drop=True)
+        if not derived or valid.all() or retained.empty:
+            return (
+                retained,
+                fixed.loc[valid].reset_index(drop=True),
+                random.loc[valid].reset_index(drop=True),
+            )
+        # Formula transforms can exclude additional visits. Update the origin
+        # of time before rebuilding matrices, rather than retaining stale times.
+        tbl = retained
+
+
 def prepare_mixed_design(
     formula: ModelFormula,
     tbl: pd.DataFrame,
@@ -119,30 +172,12 @@ def prepare_mixed_design(
     min_observations: int = 10,
 ) -> MixedDesign:
     """Select and validate complete visits before any image preprocessing."""
-    assert formula.random is not None  # noqa: S101
-    fixed = cast(
-        "pd.DataFrame", model_matrix(formula.fixed, tbl, na_action="ignore")
-    )
-    random = cast(
-        "pd.DataFrame", model_matrix(formula.random, tbl, na_action="ignore")
-    )
+    tbl, fixed, random = _complete_mixed_matrices(formula, tbl)
     assert formula.group is not None  # noqa: S101
     groups = tbl[formula.group]
-    required: set[str] = (
-        cast("Any", Formula)(formula.fixed).required_variables
-        | cast("Any", Formula)(formula.random).required_variables
-    )
-    # Missing categorical values can be encoded as all-zero dummy columns.
-    # Check source covariates as well as the materialized design matrices.
-    valid = (
-        np.asarray(tbl[list(required)].notna().all(axis=1))
-        & ~np.asarray(fixed.isna().any(axis=1))
-        & ~np.asarray(random.isna().any(axis=1))
-        & np.asarray(groups.notna())
-    )
-    x = fixed.loc[valid].to_numpy(dtype=float)
-    z = random.loc[valid].to_numpy(dtype=float)
-    group_values = np.asarray(groups.loc[valid])
+    x = fixed.to_numpy(dtype=float)
+    z = random.to_numpy(dtype=float)
+    group_values = np.asarray(groups)
     selected = np.array(
         [col in inference_terms for col in fixed.columns], dtype=bool
     )
@@ -163,9 +198,9 @@ def prepare_mixed_design(
         msg = "Mixed models require multiple groups and repeated observations"
         raise ValueError(msg)
     return MixedDesign(
-        table=tbl.loc[valid].reset_index(drop=True),
-        fixed=fixed.loc[valid].reset_index(drop=True),
-        random=random.loc[valid].reset_index(drop=True),
+        table=tbl,
+        fixed=fixed,
+        random=random,
         groups=group_values,
         selected=selected,
     )

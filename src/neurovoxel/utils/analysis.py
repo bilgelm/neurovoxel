@@ -28,6 +28,7 @@ from neurovoxel.utils import (
 )
 from neurovoxel.utils.formula import split_formula
 from neurovoxel.utils.inference import fdr_log_p_values
+from neurovoxel.utils.longitudinal import longitudinal_dependencies
 from neurovoxel.utils.mixed import fit_mixed_model, prepare_mixed_design
 from neurovoxel.utils.results import (
     AnalysisResult,
@@ -100,6 +101,7 @@ def run_query(  # noqa: PLR0913
         assert formula.group is not None  # noqa: S101
         tbl_vars.update(cast("Any", Formula)(formula.random).required_variables)
         tbl_vars.add(formula.group)
+        tbl_vars = longitudinal_dependencies(tbl_vars, tbl)
 
     image_df = pd.DataFrame()
     for index, image in enumerate(images):

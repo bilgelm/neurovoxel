@@ -73,6 +73,26 @@ checkboxes select which fixed effects to report. The app selects FDR and
 disables permutation controls. When calling `run_query` directly, use
 `correction="fdr"`; permutation FWE for mixed models is not supported.
 
+Mixed queries can also use age-based terms without precomputing columns:
+
+```text
+gm ~ baseline_age + time + (time | subject)
+```
+
+With a numeric `age` column and a `subject` column, `baseline_age` is each
+subject's minimum age **after image matching and all row exclusions**. Both
+`time` and `time_from_baseline` equal `age - baseline_age`, in the same units as
+`age`. Baseline uses minimum age, independent of row or session-label order,
+and always groups by `subject`, even if random effects use another group.
+Baseline and elapsed time are recalculated if formula transforms exclude
+additional visits. Visits missing age or subject are excluded when these terms
+are used. The retained table saved as `tbl.csv` contains the derived columns.
+
+These three names are reserved computed terms in mixed queries: existing
+columns with those names are replaced by the calculated values when any of
+these terms is requested. Query previews generate term names only; actual
+fitting recalculates the values from the matched, retained visits.
+
 Mixed-model inference uses two-sided asymptotic Wald z-tests, without
 small-sample Satterthwaite or Kenward-Roger adjustments. Their uncorrected
 p-values use the
