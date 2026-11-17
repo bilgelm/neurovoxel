@@ -1,7 +1,7 @@
 """Model diagnostic metrics for OLS."""
 
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -15,49 +15,14 @@ from nilearn.input_data import (  # pyright: ignore[reportMissingTypeStubs]
     MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
 )
 
+from neurovoxel.utils.viz import unmask
+
 
 class StatValues(TypedDict):
     """Represents the statistical values for a single metric."""
 
     array: np.typing.NDArray[np.float64]
     vmax: float
-
-
-def generate_stat_img(
-    voxel_data: np.typing.NDArray[np.float64],
-    masker: MultiNiftiMasker,
-) -> Nifti1Image:
-    """Reconstruct statistical values, setting voxels outside mask to NaN.
-
-    This only works for non negative values.
-    """
-    values = np.asarray(voxel_data).ravel()
-
-    if values.size != masker.n_elements_:
-        message = (
-            f"Got {values.size} values, but the masker "
-            f"expects {masker.n_elements_} voxels."
-        )
-        raise ValueError(message)
-
-    img: Nifti1Image = cast(
-        "Nifti1Image",
-        masker.inverse_transform(values),  # pyright: ignore[reportUnknownMemberType]
-    )
-    data = img.get_fdata()
-
-    mask_img = masker.mask_img_  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    if not isinstance(mask_img, Nifti1Image):
-        message = "masker.mask_img_ must be a Nifti1Image."
-        raise TypeError(message)
-
-    outside_mask: np.typing.NDArray[np.bool_] = mask_img.get_fdata() == 0
-    data[outside_mask] = np.nan
-
-    header = img.header.copy()
-    header.set_data_dtype(data.dtype)  # pyright: ignore[reportUnknownMemberType]
-
-    return Nifti1Image(data, img.affine, header)
 
 
 def generate_ols_results_pdf(
@@ -74,7 +39,7 @@ def generate_ols_results_pdf(
     with PdfPages(output_path) as output_pdf:
         for key, value_dict in stat_values.items():
             values: np.typing.NDArray[np.float64] = value_dict["array"]
-            img = generate_stat_img(values, masker)
+            img = unmask(values, masker, np.float64(np.nan))
             fig = Figure(figsize=(10, 4))
             cmap = mpl.colormaps["viridis"].copy()
             cmap.set_under("black")
