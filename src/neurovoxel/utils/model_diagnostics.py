@@ -44,15 +44,8 @@ def generate_ols_results_pdf(
             cmap = mpl.colormaps["viridis"].copy()
             cmap.set_under("black")
 
-            # Change only the plotting copy; preserve NaNs in the original image
-            data = img.get_fdata()
-            plot_img = nib.Nifti1Image(  # pyright: ignore[reportPrivateImportUsage]
-                np.where(np.isnan(data), -1.0, data),
-                img.affine,
-            )
-
             plotting.plot_stat_map(  # pyright: ignore[reportUnknownMemberType]
-                plot_img,
+                img,
                 figure=fig,
                 bg_img=bg_img,
                 display_mode="ortho",
