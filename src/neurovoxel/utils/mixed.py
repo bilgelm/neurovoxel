@@ -4,11 +4,15 @@
 
 import warnings
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
 import pandas as pd
-from formulaic import model_matrix  # pyright: ignore[reportUnknownVariableType]
+from formulaic import (
+    Formula,
+    model_matrix,  # pyright: ignore[reportUnknownVariableType]
+)
 from joblib import (
     Parallel,
     delayed,  # pyright: ignore[reportUnknownVariableType]
@@ -96,25 +100,25 @@ def _fit_voxels(  # noqa: PLR0913
     return [fits_by_voxel[index] for index in range(total)]
 
 
-def fit_mixed_model(  # noqa: PLR0913
+@dataclass(frozen=True)
+class MixedDesign:
+    """Complete-case model matrices and their matching visit table."""
+
+    table: pd.DataFrame
+    fixed: pd.DataFrame
+    random: pd.DataFrame
+    groups: np.typing.NDArray[Any]
+    selected: np.typing.NDArray[np.bool_]
+
+
+def prepare_mixed_design(
     formula: ModelFormula,
     tbl: pd.DataFrame,
-    y: np.typing.NDArray[Any],
-    valid_fixed: np.typing.NDArray[Any],
     inference_terms: set[str],
-    n_jobs: int,
     *,
     min_observations: int = 10,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> tuple[AnalysisResult, pd.DataFrame]:
-    """Fit fixed effects jointly with correlated within-group random effects.
-
-    All sessions are retained. Missing fixed/random covariates or group labels
-    are excluded together. Wald tests use the asymptotic normal distribution.
-    Failed voxels receive p=1 before FDR, and NaN beta/z values.
-    The optional callback receives (completed, total) voxel counts on the
-    calling thread, including failed fits, beginning at zero.
-    """
+) -> MixedDesign:
+    """Select and validate complete visits before any image preprocessing."""
     assert formula.random is not None  # noqa: S101
     fixed = cast(
         "pd.DataFrame", model_matrix(formula.fixed, tbl, na_action="ignore")
@@ -124,17 +128,24 @@ def fit_mixed_model(  # noqa: PLR0913
     )
     assert formula.group is not None  # noqa: S101
     groups = tbl[formula.group]
+    required: set[str] = (
+        cast("Any", Formula)(formula.fixed).required_variables
+        | cast("Any", Formula)(formula.random).required_variables
+    )
+    # Missing categorical values can be encoded as all-zero dummy columns.
+    # Check source covariates as well as the materialized design matrices.
     valid = (
-        valid_fixed
+        np.asarray(tbl[list(required)].notna().all(axis=1))
+        & ~np.asarray(fixed.isna().any(axis=1))
         & ~np.asarray(random.isna().any(axis=1))
         & np.asarray(groups.notna())
     )
-    # y already excludes missing fixed-effect observations in run_query.
-    y = y[valid[valid_fixed]]
     x = fixed.loc[valid].to_numpy(dtype=float)
     z = random.loc[valid].to_numpy(dtype=float)
     group_values = np.asarray(groups.loc[valid])
-    selected = np.array([col in inference_terms for col in fixed.columns])
+    selected = np.array(
+        [col in inference_terms for col in fixed.columns], dtype=bool
+    )
     if not selected.any():
         msg = "Select at least one fixed-effect term for inference"
         raise ValueError(msg)
@@ -150,6 +161,37 @@ def fit_mixed_model(  # noqa: PLR0913
     counts = pd.Series(group_values).value_counts()
     if len(counts) < 2 or not (counts > 1).any():  # noqa: PLR2004
         msg = "Mixed models require multiple groups and repeated observations"
+        raise ValueError(msg)
+    return MixedDesign(
+        table=tbl.loc[valid].reset_index(drop=True),
+        fixed=fixed.loc[valid].reset_index(drop=True),
+        random=random.loc[valid].reset_index(drop=True),
+        groups=group_values,
+        selected=selected,
+    )
+
+
+def fit_mixed_model(
+    design: MixedDesign,
+    y: np.typing.NDArray[Any],
+    n_jobs: int,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[AnalysisResult, pd.DataFrame]:
+    """Fit complete-case images against the already prepared mixed design.
+
+    The rows of y must match design.table, including preprocessing restricted
+    to those visits. Wald tests use the asymptotic normal distribution.
+    Failed voxels receive p=1 before FDR, and NaN beta/z values.
+    The optional callback receives (completed, total) voxel counts on the
+    calling thread, including failed fits, beginning at zero.
+    """
+    x = design.fixed.to_numpy(dtype=float)
+    z = design.random.to_numpy(dtype=float)
+    group_values = design.groups
+    selected = design.selected
+    if y.shape[0] != len(design.table):
+        msg = "Mixed-model images must match the complete-case visit table"
         raise ValueError(msg)
     fits = _fit_voxels(y, x, z, group_values, n_jobs, progress_callback)
     beta, scores, p_values, converged, warned = zip(*fits, strict=True)
@@ -171,10 +213,10 @@ def fit_mixed_model(  # noqa: PLR0913
             stacklevel=2,
         )
     result: AnalysisResult = {
-        "tested_var_names": fixed.columns[selected].to_list(),
+        "tested_var_names": design.fixed.columns[selected].to_list(),
         "beta": np.asarray(beta).T[selected],
         "z": np.asarray(scores).T[selected],
         "logp_fdr": fdr_log_p_values(np.asarray(p_values).T[selected]),
         "converged": np.tile(converged, (int(selected.sum()), 1)).astype(float),
     }
-    return result, tbl.loc[valid].reset_index(drop=True)
+    return result, design.table

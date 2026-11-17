@@ -28,7 +28,7 @@ from neurovoxel.utils import (
 )
 from neurovoxel.utils.formula import split_formula
 from neurovoxel.utils.inference import fdr_log_p_values
-from neurovoxel.utils.mixed import fit_mixed_model
+from neurovoxel.utils.mixed import fit_mixed_model, prepare_mixed_design
 from neurovoxel.utils.results import (
     AnalysisResult,
     PermutedOLSResult,
@@ -136,7 +136,15 @@ def run_query(  # noqa: PLR0913
         + [col for col in tbl.columns if col not in ["subject", "session"]]
     ]
 
-    x_mat_mm = model_matrix(rhs, tbl, na_action="ignore")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    mixed_design = None
+    if formula.random is not None:
+        mixed_design = prepare_mixed_design(
+            formula, tbl, inference_terms, min_observations=MIN_N_OBS
+        )
+        tbl = mixed_design.table
+        x_mat_mm = mixed_design.fixed
+    else:
+        x_mat_mm = model_matrix(rhs, tbl, na_action="ignore")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     x_mat = x_mat_mm.to_numpy()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
     # Build y_mat from the image paths corresponding to the filtered `tbl` so
@@ -147,6 +155,11 @@ def run_query(  # noqa: PLR0913
         handle_zero_voxels,
         voxelwise_standardization,
     )
+
+    if mixed_design is not None:
+        return fit_mixed_model(
+            mixed_design, y_mat, n_jobs, progress_callback=progress_callback
+        )
 
     # handle missing independent variables by excluding observations
     # Remove rows from x_mat and y_mat where x_mat contains any missing values
@@ -163,18 +176,6 @@ def run_query(  # noqa: PLR0913
 
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
-
-    if formula.random is not None:
-        return fit_mixed_model(
-            formula,
-            tbl,
-            y_mat,
-            valid_rows,
-            inference_terms,
-            n_jobs,
-            min_observations=MIN_N_OBS,
-            progress_callback=progress_callback,
-        )
 
     # ------------------------------
     # Compute OLS beta coefficients

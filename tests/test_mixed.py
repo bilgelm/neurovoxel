@@ -11,6 +11,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from joblib import parallel_config
+from nibabel.loadsave import (
+    save as save_img,  # pyright: ignore[reportUnknownVariableType]
+)
+from nibabel.nifti1 import Nifti1Image
 from nilearn.maskers import MultiNiftiMasker
 from statsmodels.regression.mixed_linear_model import MixedLM
 
@@ -74,8 +78,11 @@ def test_longitudinal_matches_statsmodels(
         for i, row in tbl.iterrows()
     ]
 
-    def prepare_y(*_args: object) -> np.typing.NDArray[np.float64]:
-        return y.copy()
+    def prepare_y(
+        paths: np.typing.NDArray[Any], *_args: object
+    ) -> np.typing.NDArray[np.float64]:
+        indices = [int(Path(path).name.split(".")[0]) for path in paths]
+        return y[indices].copy()
 
     monkeypatch.setattr(analysis, "prepare_y_mat", prepare_y)
     progress: list[tuple[int, int]] = []
@@ -180,11 +187,10 @@ def test_failed_voxel_is_conservative(
     monkeypatch.setattr(mod, "_fit_voxel", fake_fit)
     with pytest.warns(RuntimeWarning, match="1/2 voxels failed"):
         result, _ = mod.fit_mixed_model(
-            split_formula("image ~ age + (1|id)"),
-            tbl,
+            mod.prepare_mixed_design(
+                split_formula("image ~ age + (1|id)"), tbl, {"age"}
+            ),
             y,
-            np.ones(len(tbl), dtype=bool),
-            {"age"},
             1,
         )
     assert "z" in result
@@ -217,11 +223,10 @@ def test_all_voxels_fail(
     monkeypatch.setattr(mod, "MixedLM", fake_model)
     with pytest.raises(ValueError, match="failed at every voxel"):
         mod.fit_mixed_model(
-            split_formula("image ~ age + (1|id)"),
-            tbl,
+            mod.prepare_mixed_design(
+                split_formula("image ~ age + (1|id)"), tbl, {"age"}
+            ),
             y,
-            np.ones(len(tbl), dtype=bool),
-            {"age"},
             1,
         )
 
@@ -243,7 +248,7 @@ def test_mixed_invalid_design(
     case: str,
 ) -> None:
     """Reject unusable or deficient designs before voxel fitting."""
-    tbl, y = longitudinal
+    tbl, _ = longitudinal
     query = "image ~ age + (1|id)"
     terms = {"age"}
     if case == "one_group":
@@ -262,14 +267,7 @@ def test_mixed_invalid_design(
         tbl["time"] = 1.0
         query = "image ~ age + (1 + time|id)"
     with pytest.raises(ValueError, match="require|Insufficient|Select|[Rr]ank"):
-        mod.fit_mixed_model(
-            split_formula(query),
-            tbl,
-            y,
-            np.ones(len(tbl), dtype=bool),
-            terms,
-            1,
-        )
+        mod.prepare_mixed_design(split_formula(query), tbl, terms)
 
 
 def test_parallel_progress_tracks_completions_and_preserves_voxel_order(
@@ -310,3 +308,172 @@ def test_parallel_progress_tracks_completions_and_preserves_voxel_order(
     assert updates == [(0, 2), (1, 2), (2, 2)]
     assert finished == [1, 0]
     assert [float(result[0][0]) for result in results] == [0.0, 1.0]
+
+
+@pytest.mark.parametrize("standardization", ["none", "center", "scale"])
+@pytest.mark.parametrize("zero_option", ["keep", "exclude"])
+def test_incomplete_visits_excluded_before_preprocessing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+    standardization: str,
+    zero_option: str,
+) -> None:
+    """Discarded images must not affect voxel exclusion or normalization."""
+    source, values = longitudinal
+    tbl = source.iloc[:15].copy()
+    values = values[:15].copy()
+    # Each reason for dropping a visit is independent. The missing-group
+    # image would exclude every voxel; the other two corrupt normalization.
+    tbl.loc[12, "age"] = np.nan
+    tbl.loc[13, "time"] = np.nan
+    tbl.loc[14, "id"] = np.nan
+    values[12] = 1e9
+    values[13] = -1e9
+    values[14] = 0
+    paths: list[Path] = []
+    images: list[Any] = []
+    for index, row in tbl.iterrows():
+        path = tmp_path / f"visit-{index}.nii.gz"
+        data = np.zeros((2, 2, 2))
+        data[:, 0, 0] = values[int(str(index))]
+        save_img(Nifti1Image(data, np.eye(4)), path)
+        paths.append(path)
+        images.append(
+            SimpleNamespace(
+                path=path.name,
+                get_entities=lambda row=row: {
+                    "sub": row.subject,
+                    "ses": row.session,
+                },
+            )
+        )
+    mask = np.zeros((2, 2, 2), dtype=np.uint8)
+    mask[:, 0, 0] = 1
+    masker = MultiNiftiMasker(
+        mask_img=Nifti1Image(mask, np.eye(4)), reports=False
+    )
+    transform = cast("Any", masker).fit_transform
+    loaded: list[Path] = []
+
+    def extract(
+        paths: np.typing.NDArray[Any],
+    ) -> list[np.typing.NDArray[Any]]:
+        loaded.extend(Path(path) for path in paths)
+        return transform(paths)
+
+    monkeypatch.setattr(masker, "fit_transform", extract)
+    expected = values[:12].copy()
+    if standardization in {"center", "scale"}:
+        expected -= expected.mean()
+    if standardization == "scale":
+        expected /= expected.std()
+
+    def fits(
+        y: np.typing.NDArray[Any],
+        x: np.typing.NDArray[Any],
+        z: np.typing.NDArray[Any],
+        groups: np.typing.NDArray[Any],
+        *_args: object,
+    ) -> list[mod.VoxelFit]:
+        np.testing.assert_allclose(y, expected)
+        np.testing.assert_allclose(x[:, 1], np.asarray(tbl.iloc[:12]["age"]))
+        np.testing.assert_allclose(z[:, 1], np.asarray(tbl.iloc[:12]["time"]))
+        np.testing.assert_array_equal(groups, np.asarray(tbl.iloc[:12]["id"]))
+        return [
+            (np.zeros(2), np.ones(2), np.full(2, 0.5), True, False) for _ in y.T
+        ]
+
+    monkeypatch.setattr(mod, "_fit_voxels", fits)
+    result, used = analysis.run_query(
+        "image ~ age + (1 + time | id)",
+        tmp_path,
+        {"age"},
+        tbl.sample(frac=1, random_state=7),
+        images[::-1],
+        masker,
+        99,
+        1,
+        42,
+        tfce=False,
+        correction="fdr",
+        handle_zero_voxels=zero_option,
+        voxelwise_standardization=standardization,
+    )
+    assert loaded == paths[:12]
+    pd.testing.assert_frame_equal(
+        used[["subject", "session"]], tbl.iloc[:12][["subject", "session"]]
+    )
+    assert result["beta"].shape == (1, 2)
+    assert masker.n_elements_ == expected.shape[1]
+
+
+def test_too_few_complete_visits_fail_before_image_loading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+) -> None:
+    """Validate the joint complete-case count before reading any images."""
+    tbl, _ = longitudinal
+    tbl["id"] = np.nan
+    images = [
+        SimpleNamespace(
+            path=f"{index}.nii.gz",
+            get_entities=lambda row=row: {
+                "sub": row.subject,
+                "ses": row.session,
+            },
+        )
+        for index, row in tbl.iterrows()
+    ]
+
+    def unexpected_preprocessing(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Images should not be read")
+
+    monkeypatch.setattr(analysis, "prepare_y_mat", unexpected_preprocessing)
+    with pytest.raises(ValueError, match="Insufficient observations"):
+        analysis.run_query(
+            "image ~ age + (1 + time | id)",
+            tmp_path,
+            {"age"},
+            tbl,
+            cast("Any", images),
+            MultiNiftiMasker(),
+            99,
+            1,
+            42,
+            tfce=False,
+            correction="fdr",
+        )
+
+
+def test_fit_requires_images_aligned_with_complete_design(
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+) -> None:
+    """Reject mismatched image rows rather than fit misaligned visits."""
+    tbl, y = longitudinal
+    design = mod.prepare_mixed_design(
+        split_formula("image ~ age + (1|id)"), tbl, {"age"}
+    )
+    with pytest.raises(ValueError, match="must match the complete-case"):
+        mod.fit_mixed_model(design, y[:-1], 1)
+
+
+@pytest.mark.parametrize("random_category", [False, True])
+def test_missing_categorical_covariate_is_incomplete(
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+    random_category: bool,
+) -> None:
+    """An all-zero dummy encoding must not hide a missing source covariate."""
+    tbl, _ = longitudinal
+    tbl["category"] = pd.Series(["a", "b"] * len(tbl)).iloc[: len(tbl)]
+    tbl.loc[0, "category"] = None
+    query = (
+        "image ~ age + (1 + C(category) | id)"
+        if random_category
+        else "image ~ age + C(category) + (1 | id)"
+    )
+    design = mod.prepare_mixed_design(split_formula(query), tbl, {"age"})
+    assert len(design.table) == len(tbl) - 1
+    assert design.table["category"].notna().all()
+    np.testing.assert_array_equal(design.groups, np.asarray(tbl["id"].iloc[1:]))
