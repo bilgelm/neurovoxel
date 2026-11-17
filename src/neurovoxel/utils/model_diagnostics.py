@@ -5,7 +5,6 @@ from typing import TypedDict
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import nibabel as nib
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
