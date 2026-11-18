@@ -186,32 +186,45 @@ def main(
     if run_btn and lhs and rhs is not None:
         _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
 
-        class StatValues(TypedDict):
-            array: np.typing.NDArray[np.float64]
-            vmax: float
-
-        stat_values: dict[str, StatValues] = {
-            "r_square": {
-                "array": st.session_state.result["r_square"],
-                "vmax": 1.0,
-            },
-            "f_stat": {
-                "array": st.session_state.result["f_stat"],
-                "vmax": float(np.nanmax(st.session_state.result["f_stat"])),
-            },
-            "f_pvalues": {
-                "array": st.session_state.result["f_pvalues"],
-                "vmax": 1.0,
-            },
-        }
         if valid_outputdir:
-            generate_ols_results_pdf(
-                stat_values=stat_values,
-                masker=st.session_state.masker,
-                bg_img=st.session_state.get("paths", {}).get("template"),
-                output_path=Path(st.session_state.paths["outputdir"])
-                / "ols_results.pdf",
-            )
+
+            class StatValues(TypedDict):
+                array: np.typing.NDArray[np.float64]
+                vmax: float
+
+            stat_values: dict[str, StatValues] = {}
+
+            for key in ("r_square", "f_stat", "f_pvalues"):
+                values = np.asarray(
+                    st.session_state.result[key],
+                    dtype=np.float64,
+                )
+                finite_values = values[np.isfinite(values)]
+
+                # Skip unavailable diagnostics, such as the overall
+                # F-test for an intercept-only model.
+                if finite_values.size == 0:
+                    continue
+
+                stat_values[key] = {
+                    "array": values,
+                    "vmax": (
+                        max(float(finite_values.max()), 1.0)
+                        if key == "f_stat"
+                        else 1.0
+                    ),
+                }
+
+            if stat_values:
+                generate_ols_results_pdf(
+                    stat_values=stat_values,
+                    masker=st.session_state.masker,
+                    bg_img=st.session_state.get("paths", {}).get("template"),
+                    output_path=(
+                        Path(st.session_state.paths["outputdir"])
+                        / "ols_results.pdf"
+                    ),
+                )
 
     render_footer()
     if debug:

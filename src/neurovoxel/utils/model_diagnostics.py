@@ -38,7 +38,7 @@ def generate_ols_results_pdf(
     with PdfPages(output_path) as output_pdf:
         for key, value_dict in stat_values.items():
             values: np.typing.NDArray[np.float64] = value_dict["array"]
-            img = unmask(values, masker, np.float64(np.nan))
+            img = unmask(values, masker, np.float64(-1))
             fig = Figure(figsize=(10, 4))
             cmap = mpl.colormaps["viridis"].copy()
             cmap.set_under("black")

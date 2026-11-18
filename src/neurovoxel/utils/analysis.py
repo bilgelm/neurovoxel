@@ -189,23 +189,27 @@ def run_query(  # noqa: PLR0913, PLR0915
     ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+
+    # MODEL DIAGNOSTICS
+
     r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # type: ignore  # noqa: PGH003
 
-    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    # Unavailable diagnostics default to NaN.
+    n_voxels = y_mat.shape[1]
+    f_stat = np.full(n_voxels, np.nan, dtype=np.float64)
+    f_pvalues = np.full(n_voxels, np.nan, dtype=np.float64)
 
-    if not non_intercept.any():
-        msg = "No non-intercept predictors to test."
-        raise ValueError(msg)
+    if non_intercept.any():
+        contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        f_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType]
 
-    contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-
-    f_statistic_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
-    f_stat = np.asarray(f_statistic_results.F).ravel()
-    df_num = f_statistic_results.df_num  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType] # Numerator degrees of freedom
-    df_den = f_statistic_results.df_den  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType] # Denominator degrees of freedom
-
-    # 4. Compute the p-values using SciPy's survival function (1 - CDF)
-    f_pvalues = f.sf(f_stat, df_num, df_den)  # pyright: ignore[reportUnknownMemberType]
+        f_stat = np.asarray(f_results.F).ravel()
+        f_pvalues = f.sf(  # pyright: ignore[reportUnknownMemberType]
+            f_stat,
+            f_results.df_num,  # pyright: ignore[reportUnknownMemberType]
+            f_results.df_den,  # pyright: ignore[reportUnknownMemberType]
+        )
 
     # ------------------------------
     # Run permutation-based inference
