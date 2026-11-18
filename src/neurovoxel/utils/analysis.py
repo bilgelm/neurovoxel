@@ -158,6 +158,21 @@ def run_query(  # noqa: PLR0913, PLR0915
     x_mat_mm = model_matrix(rhs, tbl, na_action="ignore")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     x_mat = x_mat_mm.to_numpy()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
+    predictor_names: np.typing.NDArray[Any] = np.asarray(x_mat_mm.columns)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    non_intercept = predictor_names != "Intercept"
+
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    if zero_terms:
+        message = (
+            "Analysis stopped: these predictor columns contain only zeros: "
+            + ", ".join(zero_terms)
+        )
+        raise ValueError(message)
+
     # Build y_mat from the image paths corresponding to the filtered `tbl` so
     # rows of y_mat align with rows of x_mat.
     y_mat = prepare_y_mat(
@@ -182,6 +197,18 @@ def run_query(  # noqa: PLR0913, PLR0915
 
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
+
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    if zero_terms:
+        raise ValueError(
+            "Analysis stopped: these predictor columns contain only zeros "
+            "after removing observations with missing predictors: "
+            + ", ".join(zero_terms)
+        )
 
     # ------------------------------
     # Compute OLS beta coefficients
