@@ -64,12 +64,9 @@ def generate_ols_results_pdf(
             # Page 2: Histogram of R² values
             fig, ax = plt.subplots(figsize=(8, 5))  # pyright: ignore[reportUnknownMemberType]
 
-            ax.hist(  # pyright: ignore[reportUnknownMemberType]
-                np.asarray(  # pyright: ignore[reportUnknownMemberType]
-                    values, dtype=float
-                ).ravel(),
-                bins=50,
-            )  # pyright: ignore[reportUnknownMemberType]
+            finite_values = np.asarray(values, dtype=float).ravel()
+            finite_values = finite_values[np.isfinite(finite_values)]
+            ax.hist(finite_values, bins=50)  # pyright: ignore[reportUnknownMemberType]
             ax.set(
                 xlabel=f"{key}",
                 ylabel="Number of voxels",
