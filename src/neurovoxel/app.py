@@ -3,7 +3,10 @@
 # pyright: reportMissingTypeStubs=false
 
 import argparse
+import json
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import streamlit as st
 from atlasreader import (
@@ -89,8 +92,9 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             lhs,
         )
 
+        atlasreader_output_path: Path | None = None
         if st.session_state.space_verification_input:
-            atlasreader_output_path: Path = outpath / "atlasreader_output"
+            atlasreader_output_path = outpath / "atlasreader_output"
             atlasreader_output_path.mkdir(exist_ok=True)
             create_output(
                 outpath / statistical_maps[1],
@@ -114,6 +118,40 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             atlasreader_output,
         )
         save_parameters(outpath / "parameters.json", output_parameters)
+
+        buffer = BytesIO()
+
+        with ZipFile(buffer, mode="w") as archive:
+            archive.writestr(
+                "parameters.json",
+                json.dumps(output_parameters, indent=2),
+            )
+            archive.writestr(
+                "tbl.csv",
+                st.session_state.tbl.to_csv(index=False),
+            )
+            for filename in statistical_maps:
+                archive.write(
+                    outpath / filename,
+                    arcname=filename,
+                )
+            if atlasreader_output_path is not None:
+                for file_path in atlasreader_output_path.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(
+                            file_path,
+                            arcname=(
+                                Path("atlasreader_output")
+                                / file_path.relative_to(atlasreader_output_path)
+                            ),
+                        )
+
+        st.download_button(
+            label="Download results",
+            data=buffer.getvalue(),
+            file_name="neurovoxel_results.zip",
+            mime="application/zip",
+        )
 
 
 def main(

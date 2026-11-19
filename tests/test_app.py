@@ -1,8 +1,10 @@
 """Test streamlit app."""
 
 import sys
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, sentinel
+from zipfile import ZipFile
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -200,12 +202,15 @@ def test_save_analysis_results(  # noqa: PLR0915
     state.masker = sentinel.masker
     state.space_verification_input = verify_space
     state.tbl.describe.return_value = sentinel.summary_stats
+    state.tbl.to_csv.return_value = "column\nvalue\n"
+    for filename in statistical_maps:
+        (tmp_path / filename).write_text("map data", encoding="utf-8")
 
     mocked_runner: Mock = Mock()
     mocked_visualization: Mock = Mock()
     mocked_save_maps: Mock = Mock(return_value=statistical_maps)
     mocked_parameter_output: Mock = Mock(
-        return_value=sentinel.output_parameters,
+        return_value={"test": "value"},
     )
     mocked_save_parameters: Mock = Mock()
 
@@ -260,9 +265,11 @@ def test_save_analysis_results(  # noqa: PLR0915
         sentinel.masker,
         lhs,
     )
-    state.tbl.to_csv.assert_called_once_with(
-        tmp_path / "tbl.csv",
-        index=False,
+    state.tbl.to_csv.assert_has_calls(
+        [
+            call(tmp_path / "tbl.csv", index=False),
+            call(index=False),
+        ]
     )
 
     expected_atlas_output: list[str] | None = None
@@ -289,8 +296,25 @@ def test_save_analysis_results(  # noqa: PLR0915
     )
     mocked_save_parameters.assert_called_once_with(
         tmp_path / "parameters.json",
-        sentinel.output_parameters,
+        {"test": "value"},
     )
+
+    download_args = mocked_st.download_button.call_args.kwargs
+    with ZipFile(BytesIO(download_args["data"])) as archive:
+        archive_names = archive.namelist()
+        assert "parameters.json" in archive_names
+        assert "tbl.csv" in archive_names
+        assert statistical_maps[0] in archive_names
+        assert statistical_maps[1] in archive_names
+        if verify_space:
+            assert "atlasreader_output/clusters.csv" in archive_names
+            assert archive.read("atlasreader_output/clusters.csv") == (
+                b"cluster,label\n1,example\n"
+            )
+        else:
+            assert not any(
+                name.startswith("atlasreader_output/") for name in archive_names
+            )
 
 
 # Test for main function
