@@ -6,6 +6,7 @@ import argparse
 import json
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
 import streamlit as st
@@ -109,7 +110,6 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
         else:
             atlasreader_output = None
 
-        st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
         output_parameters = parameter_output(
             st.session_state.paths,
             analysis,
