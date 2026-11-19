@@ -29,6 +29,10 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
+from neurovoxel.utils.mixed_diagnostics import (
+    DIAGNOSTICS_FILENAME,
+    SUMMARY_FILENAME,
+)
 from neurovoxel.utils.output import (
     parameter_output,
     save_parameters,
@@ -72,7 +76,12 @@ def _handle_query() -> tuple[str | None, object | None]:
 
 def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
     """Render and optionally save the completed analysis."""
-    render_model_runner(lhs)
+    diagnostics_outputdir = (
+        Path(st.session_state.get("paths", {}).get("outputdir"))
+        if valid_outputdir
+        else None
+    )
+    render_model_runner(lhs, diagnostics_outputdir=diagnostics_outputdir)
     st.subheader("Results")
     summary_stats = st.session_state.tbl.describe()
     st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
@@ -113,6 +122,12 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             "tbl.csv",
             atlasreader_output,
         )
+        result = st.session_state.result
+        if isinstance(result, dict) and "mixed_diagnostics" in result:
+            output_parameters["mixed model diagnostics"] = {
+                "summary": SUMMARY_FILENAME,
+                "voxel_attempts": DIAGNOSTICS_FILENAME,
+            }
         save_parameters(outpath / "parameters.json", output_parameters)
 
 

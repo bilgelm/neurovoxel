@@ -30,6 +30,7 @@ from neurovoxel.utils.formula import split_formula
 from neurovoxel.utils.inference import fdr_log_p_values
 from neurovoxel.utils.longitudinal import longitudinal_dependencies
 from neurovoxel.utils.mixed import fit_mixed_model, prepare_mixed_design
+from neurovoxel.utils.mixed_diagnostics import MixedDiagnostics
 from neurovoxel.utils.results import (
     AnalysisResult,
     PermutedOLSResult,
@@ -71,6 +72,7 @@ def run_query(  # noqa: PLR0913
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm]
     correction: Literal["fwe", "fdr"] = "fwe",
     progress_callback: Callable[[int, int], None] | None = None,
+    diagnostics_callback: Callable[[MixedDiagnostics], None] | None = None,
 ) -> tuple[AnalysisResult, pd.DataFrame]:
     """Run ordinary or longitudinal mixed-effects regression voxelwise.
 
@@ -160,7 +162,11 @@ def run_query(  # noqa: PLR0913
 
     if mixed_design is not None:
         return fit_mixed_model(
-            mixed_design, y_mat, n_jobs, progress_callback=progress_callback
+            mixed_design,
+            y_mat,
+            n_jobs,
+            progress_callback=progress_callback,
+            diagnostics_callback=diagnostics_callback,
         )
 
     # handle missing independent variables by excluding observations

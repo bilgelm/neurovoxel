@@ -12,6 +12,10 @@ import streamlit as st
 from neurovoxel.utils import STANDARDIZATION_OPTS
 from neurovoxel.utils.analysis import get_masker, run_query
 from neurovoxel.utils.formula import split_formula
+from neurovoxel.utils.mixed_diagnostics import (
+    MixedDiagnostics,
+    save_mixed_diagnostics,
+)
 
 if TYPE_CHECKING:
     from streamlit.delta_generator import DeltaGenerator
@@ -57,15 +61,21 @@ def _lme_progress(
             bar.empty()
 
 
-def render_model_runner(lhs: str) -> None:
+def render_model_runner(
+    lhs: str, *, diagnostics_outputdir: Path | None = None
+) -> None:
     """Render the model runner UI for NeuroVoxel app."""
     query = st.session_state.analysis.get("query", "")
     mixed = split_formula(query).random is not None
     with _lme_progress(prepare=mixed) as progress:
-        _run_model(lhs, progress)
+        _run_model(lhs, progress, diagnostics_outputdir)
 
 
-def _run_model(lhs: str, progress: Callable[[int, int], None]) -> None:
+def _run_model(
+    lhs: str,
+    progress: Callable[[int, int], None],
+    diagnostics_outputdir: Path | None,
+) -> None:
     """Load the selected images and run the analysis with an active UI."""
     row = (
         st.session_state.entity_df.loc[
@@ -87,6 +97,17 @@ def _run_model(lhs: str, progress: Callable[[int, int], None]) -> None:
             n_jobs=st.session_state.get("analysis", {}).get("n_jobs", -1),
         )
 
+        st.session_state.pop("mixed_diagnostics", None)
+
+        def capture_diagnostics(diagnostics: MixedDiagnostics) -> None:
+            st.session_state.mixed_diagnostics = diagnostics
+            if diagnostics_outputdir is not None:
+                save_mixed_diagnostics(
+                    diagnostics_outputdir,
+                    diagnostics,
+                    st.session_state.masker.mask_img_,
+                )
+
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", RuntimeWarning)
             st.session_state.result, st.session_state.tbl = run_query(
@@ -98,6 +119,7 @@ def _run_model(lhs: str, progress: Callable[[int, int], None]) -> None:
                 st.session_state.masker,
                 correction=st.session_state.analysis.get("correction", "fwe"),
                 progress_callback=progress,
+                diagnostics_callback=capture_diagnostics,
                 voxelwise_standardization=st.session_state.analysis.get(
                     "voxelwise_standardization", STANDARDIZATION_OPTS[0]
                 ),

@@ -73,6 +73,30 @@ checkboxes select which fixed effects to report. The app selects FDR and
 disables permutation controls. When calling `run_query` directly, use
 `correction="fdr"`; permutation FWE for mixed models is not supported.
 
+Each voxel explicitly tries L-BFGS, BFGS, then CG, using a fresh model for each
+attempt and 100 iterations per attempt. Exceptions, nonconvergence, and
+nonfinite fixed-effect inference trigger the next optimizer. The first
+converged fit with finite beta/z/p is accepted; warnings are retained for
+review. Exhausted retries receive NaN beta/z and p=1 before FDR.
+
+When an output directory is selected, mixed fits also save:
+
+- `lme_fit_summary.json`: failure reasons, warning categories and examples,
+  optimizer outcomes, recovered voxel counts, model specification and settings.
+- `lme_fit_diagnostics.jsonl`: one record per voxel with all optimizer attempts,
+  exact warnings and repetition counts, exception messages and tracebacks,
+  elapsed times, available iteration counts, random-effect covariance estimates
+  and residual variances. Records include the zero-based voxel index, IJK
+  coordinates and world coordinates in millimeters in the final fitted mask.
+
+These files are written after voxel fitting and before plotting or raising an
+all-voxel inference error, so failed runs retain their diagnostics. Successful
+runs reference the files in `parameters.json`. Without an output directory,
+`run_query` returns diagnostics in `result["mixed_diagnostics"]`; an all-voxel
+failure raises `MixedModelFitError` with a `diagnostics` attribute. Warning
+occurrence counts include every attempt; terminal failure counts exclude
+voxels recovered by retries.
+
 Mixed queries can also use age-based terms without precomputing columns:
 
 ```text

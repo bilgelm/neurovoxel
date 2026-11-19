@@ -3,8 +3,11 @@
 # pyright: reportMissingTypeStubs=false
 
 import warnings
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from time import perf_counter
+from traceback import format_exc
 from typing import Any, cast
 
 import numpy as np
@@ -26,15 +29,125 @@ from neurovoxel.utils.longitudinal import (
     add_longitudinal_terms,
     longitudinal_dependencies,
 )
+from neurovoxel.utils.mixed_diagnostics import (
+    FitWarning,
+    MixedDiagnostics,
+    OptimizerAttempt,
+    VoxelDiagnostic,
+    summarize_mixed_diagnostics,
+)
 from neurovoxel.utils.results import AnalysisResult
 
-type VoxelFit = tuple[
-    np.typing.NDArray[Any],
-    np.typing.NDArray[Any],
-    np.typing.NDArray[Any],
-    bool,
-    bool,
-]
+MIXED_OPTIMIZERS = ("lbfgs", "bfgs", "cg")
+# Preserve the previous Statsmodels default iteration budget per attempt.
+MIXED_MAXITER = 100
+
+
+@dataclass(frozen=True)
+class VoxelFit:
+    """Inference results and the complete independent optimizer history."""
+
+    beta: np.typing.NDArray[Any]
+    z: np.typing.NDArray[Any]
+    p: np.typing.NDArray[Any]
+    converged: bool
+    attempts: tuple[OptimizerAttempt, ...] = ()
+
+
+class MixedModelFitError(ValueError):
+    """An all-voxel inference failure with diagnostics retained for callers."""
+
+    def __init__(self, diagnostics: MixedDiagnostics) -> None:
+        """Retain diagnostics when no voxel provides accepted inference."""
+        self.diagnostics = diagnostics
+        reasons = diagnostics["summary"]["final_failure_reasons"]
+        super().__init__(
+            "Mixed-effects inference failed at every voxel; "
+            f"check the model and data. Failure reasons: {reasons}"
+        )
+
+
+def _warning_records(caught: list[warnings.WarningMessage]) -> list[FitWarning]:
+    counts = Counter((w.category.__name__, str(w.message)) for w in caught)
+    return [
+        {"category": category, "message": message, "count": count}
+        for (category, message), count in counts.items()
+    ]
+
+
+def _fit_attempt(
+    optimizer: str,
+    y: np.typing.NDArray[Any],
+    x: np.typing.NDArray[Any],
+    random: np.typing.NDArray[Any],
+    groups: np.typing.NDArray[Any],
+) -> tuple[VoxelFit | None, OptimizerAttempt]:
+    """Use a fresh model and capture warnings even when fitting raises."""
+    started = perf_counter()
+    attempt: OptimizerAttempt = {
+        "optimizer": optimizer,
+        "status": "exception",
+        "converged": None,
+        "elapsed_seconds": 0.0,
+        "warnings": [],
+    }
+    accepted = None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            fit = cast("Any", MixedLM(y, x, groups, exog_re=random)).fit(
+                reml=True,
+                method=optimizer,
+                maxiter=MIXED_MAXITER,
+                full_output=True,
+                disp=False,
+            )
+            beta = np.asarray(fit.fe_params, dtype=float)
+            z = np.asarray(fit.tvalues[: x.shape[1]], dtype=float)
+            p = np.asarray(fit.pvalues[: x.shape[1]], dtype=float)
+            attempt["converged"] = bool(fit.converged)
+            nonfinite = [
+                name
+                for name, value in (("beta", beta), ("z", z), ("p", p))
+                if not np.isfinite(value).all()
+            ]
+            attempt["nonfinite_fields"] = nonfinite
+            attempt["status"] = (
+                "nonconverged"
+                if not fit.converged
+                else "nonfinite"
+                if nonfinite
+                else "success"
+            )
+            covariance = getattr(fit, "cov_re", None)
+            if covariance is not None:
+                attempt["random_effect_covariance"] = [
+                    [float(v) if np.isfinite(v) else None for v in row]
+                    for row in np.asarray(covariance, dtype=float)
+                ]
+            scale = getattr(fit, "scale", None)
+            if scale is not None:
+                attempt["residual_variance"] = (
+                    float(scale) if np.isfinite(scale) else None
+                )
+            history = getattr(fit, "hist", None)
+            if history and "iterations" in history[-1]:
+                attempt["iterations"] = int(history[-1]["iterations"])
+            if attempt["status"] == "success":
+                accepted = VoxelFit(beta, z, p, converged=True)
+        except (
+            np.linalg.LinAlgError,
+            ValueError,
+            FloatingPointError,
+            OverflowError,
+        ) as error:
+            attempt["status"] = "exception"
+            attempt["exception_type"] = type(error).__name__
+            attempt["exception_message"] = str(error)
+            attempt["traceback"] = format_exc()
+    attempt["warnings"] = _warning_records(caught)
+    attempt["elapsed_seconds"] = perf_counter() - started
+    return accepted, attempt
 
 
 def _fit_voxel(
@@ -43,28 +156,28 @@ def _fit_voxel(
     random: np.typing.NDArray[Any],
     groups: np.typing.NDArray[Any],
 ) -> VoxelFit:
-    """Fit one REML model, marking unsuccessful inference conservatively."""
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        try:
-            fit = cast("Any", MixedLM(y, x, groups, exog_re=random)).fit(
-                reml=True,
-                method=["lbfgs", "bfgs", "cg"],
-                disp=False,
+    """Retry exceptions, nonconvergence and nonfinite inference."""
+    attempts: list[OptimizerAttempt] = []
+    for optimizer in MIXED_OPTIMIZERS:
+        accepted, attempt = _fit_attempt(optimizer, y, x, random, groups)
+        attempts.append(attempt)
+        if accepted is not None:
+            return VoxelFit(
+                accepted.beta,
+                accepted.z,
+                accepted.p,
+                converged=True,
+                attempts=tuple(attempts),
             )
-            beta = np.asarray(fit.fe_params)
-            z = np.asarray(fit.tvalues[: x.shape[1]])
-            p = np.asarray(fit.pvalues[: x.shape[1]])
-            if fit.converged and np.isfinite([beta, z, p]).all():
-                return beta, z, p, True, bool(caught)
-        except (np.linalg.LinAlgError, ValueError, FloatingPointError):
-            pass
     missing = np.full(x.shape[1], np.nan)
-    conservative = cast(
-        "np.typing.NDArray[np.float64]",
-        np.ones(x.shape[1], dtype=np.float64),
+    conservative = np.full_like(missing, 1.0)
+    return VoxelFit(
+        missing,
+        missing.copy(),
+        conservative,
+        converged=False,
+        attempts=tuple(attempts),
     )
-    return missing, missing.copy(), conservative, False, bool(caught)
 
 
 def _fit_indexed_voxel(
@@ -109,6 +222,7 @@ def _fit_voxels(  # noqa: PLR0913
 class MixedDesign:
     """Complete-case model matrices and their matching visit table."""
 
+    formula: ModelFormula
     table: pd.DataFrame
     fixed: pd.DataFrame
     random: pd.DataFrame
@@ -198,6 +312,7 @@ def prepare_mixed_design(
         msg = "Mixed models require multiple groups and repeated observations"
         raise ValueError(msg)
     return MixedDesign(
+        formula=formula,
         table=tbl,
         fixed=fixed,
         random=random,
@@ -212,6 +327,7 @@ def fit_mixed_model(
     n_jobs: int,
     *,
     progress_callback: Callable[[int, int], None] | None = None,
+    diagnostics_callback: Callable[[MixedDiagnostics], None] | None = None,
 ) -> tuple[AnalysisResult, pd.DataFrame]:
     """Fit complete-case images against the already prepared mixed design.
 
@@ -229,29 +345,63 @@ def fit_mixed_model(
         msg = "Mixed-model images must match the complete-case visit table"
         raise ValueError(msg)
     fits = _fit_voxels(y, x, z, group_values, n_jobs, progress_callback)
-    beta, scores, p_values, converged, warned = zip(*fits, strict=True)
-    if not any(converged):
-        msg = (
-            "Mixed-effects inference failed at every voxel; "
-            "check the model and data"
-        )
-        raise ValueError(msg)
-    n_failed = len(converged) - sum(converged)
-    if n_failed or any(warned):
+    voxels: list[VoxelDiagnostic] = [
+        {
+            "voxel_index": index,
+            "succeeded": fit.converged,
+            "successful_optimizer": fit.attempts[-1]["optimizer"]
+            if fit.converged and fit.attempts
+            else None,
+            "attempts": list(fit.attempts),
+        }
+        for index, fit in enumerate(fits)
+    ]
+    diagnostics = summarize_mixed_diagnostics(
+        voxels,
+        list(design.fixed.columns),
+        list(design.random.columns),
+        len(design.table),
+        len(np.unique(group_values)),
+        MIXED_OPTIMIZERS,
+        MIXED_MAXITER,
+    )
+    diagnostics["summary"]["formula"] = {
+        "outcome": design.formula.lhs,
+        "fixed": design.formula.fixed,
+        "random": design.formula.random,
+        "group": design.formula.group,
+    }
+    if diagnostics_callback is not None:
+        diagnostics_callback(diagnostics)
+    summary = diagnostics["summary"]
+    if not summary["n_succeeded"]:
+        raise MixedModelFitError(diagnostics)
+    if (
+        summary["n_failed"]
+        or summary["n_voxels_with_warnings"]
+        or summary["n_recovered_by_retry"]
+    ):
         warnings.warn(
-            f"Mixed-effects fits: {n_failed}/{len(fits)} voxels failed "
-            "inference "
-            f"(NaN beta/z, p=1); {sum(warned)} fits emitted "
-            "numerical warnings. "
-            "Inspect the converged maps and model specification.",
+            f"Mixed-effects fits: {summary['n_failed']}/{len(fits)} "
+            "voxels failed "
+            f"inference (NaN beta/z, p=1); {summary['n_recovered_by_retry']} "
+            f"recovered by retry; {summary['n_voxels_with_warnings']} fits "
+            "emitted warnings. "
+            f"Failure reasons: {summary['final_failure_reasons']}. "
+            "Inspect the fit diagnostics and converged maps.",
             RuntimeWarning,
             stacklevel=2,
         )
     result: AnalysisResult = {
         "tested_var_names": design.fixed.columns[selected].to_list(),
-        "beta": np.asarray(beta).T[selected],
-        "z": np.asarray(scores).T[selected],
-        "logp_fdr": fdr_log_p_values(np.asarray(p_values).T[selected]),
-        "converged": np.tile(converged, (int(selected.sum()), 1)).astype(float),
+        "beta": np.asarray([fit.beta for fit in fits]).T[selected],
+        "z": np.asarray([fit.z for fit in fits]).T[selected],
+        "logp_fdr": fdr_log_p_values(
+            np.asarray([fit.p for fit in fits]).T[selected]
+        ),
+        "converged": np.tile(
+            [fit.converged for fit in fits], (int(selected.sum()), 1)
+        ).astype(float),
     }
+    result["mixed_diagnostics"] = diagnostics
     return result, design.table

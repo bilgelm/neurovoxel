@@ -177,14 +177,15 @@ def test_failed_voxel_is_conservative(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return (
+            return mod.VoxelFit(
                 np.array([2.0, 0.7]),
                 np.array([2.0, 3.0]),
                 np.array([0.04, 0.01]),
-                True,
-                False,
+                converged=True,
             )
-        return np.full(2, np.nan), np.full(2, np.nan), np.ones(2), False, True
+        return mod.VoxelFit(
+            np.full(2, np.nan), np.full(2, np.nan), np.ones(2), converged=False
+        )
 
     monkeypatch.setattr(mod, "_fit_voxel", fake_fit)
     with pytest.warns(RuntimeWarning, match="1/2 voxels failed"):
@@ -288,7 +289,7 @@ def test_parallel_progress_tracks_completions_and_preserves_voxel_order(
             raise RuntimeError(msg)
         finished.append(voxel)
         value = np.array([float(voxel)])
-        return value, value.copy(), np.ones(1), True, False
+        return mod.VoxelFit(value, value.copy(), np.ones(1), converged=True)
 
     def update(completed: int, total: int) -> None:
         assert get_ident() == caller_thread
@@ -309,7 +310,7 @@ def test_parallel_progress_tracks_completions_and_preserves_voxel_order(
         )
     assert updates == [(0, 2), (1, 2), (2, 2)]
     assert finished == [1, 0]
-    assert [float(result[0][0]) for result in results] == [0.0, 1.0]
+    assert [float(result.beta[0]) for result in results] == [0.0, 1.0]
 
 
 @pytest.mark.parametrize("standardization", ["none", "center", "scale"])
@@ -385,7 +386,10 @@ def test_incomplete_visits_excluded_before_preprocessing(
         )
         np.testing.assert_array_equal(groups, np.asarray(tbl.iloc[:12]["id"]))
         return [
-            (np.zeros(2), np.ones(2), np.full(2, 0.5), True, False) for _ in y.T
+            mod.VoxelFit(
+                np.zeros(2), np.ones(2), np.full(2, 0.5), converged=True
+            )
+            for _ in y.T
         ]
 
     monkeypatch.setattr(mod, "_fit_voxels", fits)
@@ -552,7 +556,9 @@ def test_age_terms_use_matched_complete_visits(
         np.testing.assert_allclose(z[:, 2], np.asarray(expected["random_cov"]))
         np.testing.assert_array_equal(groups, np.asarray(expected["id"]))
         return [
-            (np.ones(4), np.ones(4), np.full(4, 0.5), True, False)
+            mod.VoxelFit(
+                np.ones(4), np.ones(4), np.full(4, 0.5), converged=True
+            )
             for _ in values.T
         ]
 
