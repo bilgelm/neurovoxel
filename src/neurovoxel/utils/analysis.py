@@ -18,6 +18,7 @@ from nilearn.maskers import MultiNiftiMasker
 from nilearn.mass_univariate import (
     permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
+from scipy.stats import f
 
 from neurovoxel.utils import (
     MULTI_SES_OPTS,
@@ -45,6 +46,9 @@ class PermutedOLSResult(TypedDict):
     mass: NotRequired[np.typing.NDArray[Any]]
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
+    r_square: np.typing.NDArray[Any]
+    f_stat: np.typing.NDArray[Any]
+    f_pvalues: np.typing.NDArray[Any]
 
 
 def get_masker(
@@ -62,7 +66,7 @@ def get_masker(
     )
 
 
-def run_query(  # noqa: PLR0913
+def run_query(  # noqa: PLR0913, PLR0915
     query: str,
     root: Path,
     inference_terms: set[str],
@@ -154,6 +158,21 @@ def run_query(  # noqa: PLR0913
     x_mat_mm = model_matrix(rhs, tbl, na_action="ignore")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     x_mat = x_mat_mm.to_numpy()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
+    predictor_names: np.typing.NDArray[Any] = np.asarray(x_mat_mm.columns)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    non_intercept = predictor_names != "Intercept"
+
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    if zero_terms:
+        message = (
+            "Analysis stopped: these predictor columns contain only zeros: "
+            + ", ".join(zero_terms)
+        )
+        raise ValueError(message)
+
     # Build y_mat from the image paths corresponding to the filtered `tbl` so
     # rows of y_mat align with rows of x_mat.
     y_mat = prepare_y_mat(
@@ -179,12 +198,45 @@ def run_query(  # noqa: PLR0913
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
 
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    if zero_terms:
+        raise ValueError(
+            "Analysis stopped: these predictor columns contain only zeros "
+            "after removing observations with missing predictors: "
+            + ", ".join(zero_terms)
+        )
+
     # ------------------------------
     # Compute OLS beta coefficients
     # ------------------------------
     ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+
+    # MODEL DIAGNOSTICS
+
+    r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # type: ignore  # noqa: PGH003
+
+    # Unavailable diagnostics default to NaN.
+    n_voxels = y_mat.shape[1]
+    f_stat = np.full(n_voxels, np.nan, dtype=np.float64)
+    f_pvalues = np.full(n_voxels, np.nan, dtype=np.float64)
+
+    if non_intercept.any():
+        contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        f_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType]
+
+        f_stat = np.asarray(f_results.F).ravel()
+        f_pvalues = f.sf(  # pyright: ignore[reportUnknownMemberType]
+            f_stat,
+            f_results.df_num,  # pyright: ignore[reportUnknownMemberType]
+            f_results.df_den,  # pyright: ignore[reportUnknownMemberType]
+        )
 
     # ------------------------------
     # Run permutation-based inference
@@ -206,6 +258,9 @@ def run_query(  # noqa: PLR0913
 
     # Attach OLS betas explicitly
     res["beta"] = beta_coef[is_inference_term, :]  # pyright: ignore[reportIndexIssue]
+    res["r_square"] = r_square_results  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_stat"] = f_stat  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_pvalues"] = f_pvalues  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
