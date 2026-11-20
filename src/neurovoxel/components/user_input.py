@@ -261,8 +261,12 @@ def render_analysis_param_input() -> None:
             )
 
 
-def render_outputdir_input(autoload: bool = False) -> bool:
-    """Get output directory path."""
+def render_outputdir_input(
+    autoload: bool = False,
+    *,
+    optional: bool = False,
+) -> bool:
+    """Get and validate an optional or required output directory path."""
     outputdir_box = st.empty()
     outputdir = outputdir_box.text_input(
         "Output directory",
@@ -273,6 +277,8 @@ def render_outputdir_input(autoload: bool = False) -> bool:
     # Update session state if the input changes
     if outputdir:
         st.session_state.paths["outputdir"] = outputdir
+    else:
+        st.session_state.paths.pop("outputdir", None)
 
     valid_outputdir = False
     if st.session_state.get("paths", {}).get("outputdir"):
@@ -290,7 +296,7 @@ def render_outputdir_input(autoload: bool = False) -> bool:
                 valid_outputdir = True
             except OSError as e:
                 st.error(f"Could not create output directory: {e}")
-    else:
+    elif not optional:
         st.write("❗️ No output directory selected.")
 
     if autoload and valid_outputdir:

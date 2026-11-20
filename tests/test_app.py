@@ -165,23 +165,25 @@ def test_handle_query(
 
 
 @pytest.mark.parametrize(
-    ("valid_outputdir", "verify_space"),
+    ("valid_outputdir", "verify_space", "output_option"),
     [
-        (False, False),
-        (True, False),
-        (True, True),
+        (False, False, False),
+        (False, True, False),
+        (True, False, True),
+        (True, True, True),
     ],
 )
-def test_save_analysis_results(  # noqa: PLR0915
+def test_save_analysis_results(  # noqa: C901, PLR0912, PLR0915
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     valid_outputdir: bool,
     verify_space: bool,
+    output_option: bool,
 ) -> None:
-    """Verify results rendering and optional saving.
+    """Verify ZIP download by default and direct saving in output mode.
 
-    A valid output directory enables saving maps, the table, and parameters.
-    Space verification additionally generates and records atlas output.
+    Output mode saves files to the selected directory without a download.
+    Default mode packages all generated files for download.
     Saving must preserve inference terms in the original session state.
     """
     lhs: str = "subject"
@@ -208,7 +210,19 @@ def test_save_analysis_results(  # noqa: PLR0915
 
     mocked_runner: Mock = Mock()
     mocked_visualization: Mock = Mock()
-    mocked_save_maps: Mock = Mock(return_value=statistical_maps)
+
+    def save_maps(
+        outputdir: Path,
+        result: object,  # noqa: ARG001
+        masker: object,  # noqa: ARG001
+        imgvar: str,  # noqa: ARG001
+    ) -> list[str]:
+        """Create mock map files in whichever output directory is used."""
+        for filename in statistical_maps:
+            (outputdir / filename).write_text("map data", encoding="utf-8")
+        return statistical_maps
+
+    mocked_save_maps: Mock = Mock(side_effect=save_maps)
     mocked_parameter_output: Mock = Mock(
         return_value={"test": "value"},
     )
@@ -236,7 +250,11 @@ def test_save_analysis_results(  # noqa: PLR0915
     monkeypatch.setattr(mod, "parameter_output", mocked_parameter_output)
     monkeypatch.setattr(mod, "save_parameters", mocked_save_parameters)
 
-    mod._save_analysis_results(lhs, valid_outputdir)  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    mod._save_analysis_results(  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+        lhs,
+        valid_outputdir,
+        output_option,
+    )
 
     # Results are always rendered.
     mocked_runner.assert_called_once_with(lhs)
@@ -251,70 +269,76 @@ def test_save_analysis_results(  # noqa: PLR0915
     # Removing inference terms from the saved copy must not alter state.
     assert state.analysis == analysis
 
-    if not valid_outputdir:
-        mocked_save_maps.assert_not_called()
-        mocked_create_output.assert_not_called()
-        state.tbl.to_csv.assert_not_called()
-        mocked_parameter_output.assert_not_called()
-        mocked_save_parameters.assert_not_called()
-        return
-
-    mocked_save_maps.assert_called_once_with(
-        tmp_path,
-        sentinel.result,
-        sentinel.masker,
-        lhs,
-    )
-    state.tbl.to_csv.assert_has_calls(
-        [
-            call(tmp_path / "tbl.csv", index=False),
-            call(index=False),
-        ]
-    )
+    mocked_save_maps.assert_called_once()
+    output_path = mocked_save_maps.call_args.args[0]
+    if valid_outputdir:
+        mocked_save_maps.assert_called_once_with(
+            tmp_path,
+            sentinel.result,
+            sentinel.masker,
+            lhs,
+        )
+        state.tbl.to_csv.assert_has_calls(
+            [call(tmp_path / "tbl.csv", index=False)]
+        )
+    else:
+        assert mocked_save_maps.call_args.args[0] != tmp_path
+        state.tbl.to_csv.assert_called_once_with(index=False)
 
     expected_atlas_output: list[str] | None = None
 
     if verify_space:
-        atlas_output_path: Path = tmp_path / "atlasreader_output"
-        assert atlas_output_path.is_dir()
+        atlas_output_path: Path = output_path / "atlasreader_output"
+        if output_option:
+            assert atlas_output_path.is_dir()
         mocked_create_output.assert_called_once_with(
-            tmp_path / "statistic.nii.gz",
+            output_path / "statistic.nii.gz",
             cluster_extent=10,
             outdir=atlas_output_path,
         )
         expected_atlas_output = ["clusters.csv"]
     else:
         mocked_create_output.assert_not_called()
-        assert not (tmp_path / "atlasreader_output").exists()
+        assert not (output_path / "atlasreader_output").exists()
 
+    expected_paths = paths.copy()
+    if not output_option:
+        expected_paths.pop("outputdir")
     mocked_parameter_output.assert_called_once_with(
-        paths,
+        expected_paths,
         {"query": "test query", "cluster_size": 10},
         statistical_maps,
         "tbl.csv",
         expected_atlas_output,
     )
-    mocked_save_parameters.assert_called_once_with(
-        tmp_path / "parameters.json",
-        {"test": "value"},
-    )
+    if output_option:
+        mocked_save_parameters.assert_called_once_with(
+            tmp_path / "parameters.json",
+            {"test": "value"},
+        )
+    else:
+        mocked_save_parameters.assert_not_called()
 
-    download_args = mocked_st.download_button.call_args.kwargs
-    with ZipFile(BytesIO(download_args["data"])) as archive:
-        archive_names = archive.namelist()
-        assert "parameters.json" in archive_names
-        assert "tbl.csv" in archive_names
-        assert statistical_maps[0] in archive_names
-        assert statistical_maps[1] in archive_names
-        if verify_space:
-            assert "atlasreader_output/clusters.csv" in archive_names
-            assert archive.read("atlasreader_output/clusters.csv") == (
-                b"cluster,label\n1,example\n"
-            )
-        else:
-            assert not any(
-                name.startswith("atlasreader_output/") for name in archive_names
-            )
+    if output_option:
+        mocked_st.download_button.assert_not_called()
+    else:
+        download_args = mocked_st.download_button.call_args.kwargs
+        with ZipFile(BytesIO(download_args["data"])) as archive:
+            archive_names = archive.namelist()
+            assert "parameters.json" in archive_names
+            assert "tbl.csv" in archive_names
+            assert statistical_maps[0] in archive_names
+            assert statistical_maps[1] in archive_names
+            if verify_space:
+                assert "atlasreader_output/clusters.csv" in archive_names
+                assert archive.read("atlasreader_output/clusters.csv") == (
+                    b"cluster,label\n1,example\n"
+                )
+            else:
+                assert not any(
+                    name.startswith("atlasreader_output/")
+                    for name in archive_names
+                )
 
 
 # Test for main function
@@ -376,12 +400,14 @@ def app_mocks(
 @pytest.mark.parametrize("autoload", [False, True])
 @pytest.mark.parametrize("use_config", [False, True])
 @pytest.mark.parametrize("debug", [False, True])
-def test_main_success(
+@pytest.mark.parametrize("output_option", [False, True])
+def test_main_success(  # noqa: PLR0913
     app_mocks: tuple[MagicMock, dict[str, Mock]],
     tmp_path: Path,
     autoload: bool,
     use_config: bool,
     debug: bool,
+    output_option: bool,
 ) -> None:
     """Verify configuration, UI rendering, loading,.
 
@@ -399,6 +425,7 @@ def test_main_success(
         config_file=config_file,
         autoload=autoload,
         debug=debug,
+        output_option=output_option,
     )
 
     mocked_st.set_page_config.assert_called_once_with(
@@ -420,7 +447,12 @@ def test_main_success(
     helpers["render_bids_input"].assert_called_once_with(autoload)
     helpers["_load_dataset"].assert_called_once_with()
     helpers["render_table_input"].assert_called_once_with(autoload)
-    helpers["render_outputdir_input"].assert_called_once_with(autoload)
+    if output_option:
+        helpers["render_outputdir_input"].assert_called_once_with(
+            autoload,
+        )
+    else:
+        helpers["render_outputdir_input"].assert_not_called()
     helpers["render_template_input"].assert_has_calls(
         [
             call("Brain template image", "template", autoload),
@@ -440,7 +472,8 @@ def test_main_success(
 
     helpers["_save_analysis_results"].assert_called_once_with(
         "subject",
-        valid_outputdir=True,
+        valid_outputdir=output_option,
+        output_option=output_option,
     )
     helpers["render_footer"].assert_called_once_with()
 

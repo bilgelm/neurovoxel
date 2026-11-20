@@ -553,6 +553,17 @@ def test_outputdir_not_given(mocked_st: Mock) -> None:
     mocked_st.error.assert_not_called()
 
 
+def test_optional_outputdir_not_given(mocked_st: Mock) -> None:
+    """Allow an empty optional output path without showing a warning."""
+    mocked_st.empty.return_value.text_input.return_value = ""
+
+    result = mod.render_outputdir_input(optional=True)
+
+    assert result is False
+    mocked_st.write.assert_not_called()
+    mocked_st.error.assert_not_called()
+
+
 # Unit test for is_directory_empty
 
 
