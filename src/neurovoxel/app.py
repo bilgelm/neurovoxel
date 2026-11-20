@@ -7,8 +7,10 @@ import json
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TypedDict
 from zipfile import ZipFile
 
+import numpy as np
 import streamlit as st
 from atlasreader import (
     create_output,  # pyright: ignore[reportUnknownVariableType]
@@ -32,6 +34,9 @@ from neurovoxel.utils.load_parse import (
     load_config,
     parse_layout,
     parse_query,
+)
+from neurovoxel.utils.model_diagnostics import (
+    generate_ols_results_pdf,
 )
 from neurovoxel.utils.output import (
     parameter_output,
@@ -247,6 +252,46 @@ def main(
             valid_outputdir=valid_outputdir,
             output_option=output_option,
         )
+
+        if valid_outputdir:
+
+            class StatValues(TypedDict):
+                array: np.typing.NDArray[np.float64]
+                vmax: float
+
+            stat_values: dict[str, StatValues] = {}
+
+            for key in ("r_square", "f_stat", "f_pvalues"):
+                values = np.asarray(
+                    st.session_state.result[key],
+                    dtype=np.float64,
+                )
+                finite_values = values[np.isfinite(values)]
+
+                # Skip unavailable diagnostics, such as the overall
+                # F-test for an intercept-only model.
+                if finite_values.size == 0:
+                    continue
+
+                stat_values[key] = {
+                    "array": values,
+                    "vmax": (
+                        max(float(finite_values.max()), 1.0)
+                        if key == "f_stat"
+                        else 1.0
+                    ),
+                }
+
+            if stat_values:
+                generate_ols_results_pdf(
+                    stat_values=stat_values,
+                    masker=st.session_state.masker,
+                    bg_img=st.session_state.get("paths", {}).get("template"),
+                    output_path=(
+                        Path(st.session_state.paths["outputdir"])
+                        / "ols_results.pdf"
+                    ),
+                )
 
     render_footer()
     if debug:

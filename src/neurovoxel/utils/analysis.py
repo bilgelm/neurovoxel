@@ -3,7 +3,7 @@
 # pyright: reportMissingTypeStubs=false
 
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,7 @@ from nilearn.maskers import MultiNiftiMasker
 from nilearn.mass_univariate import (
     permuted_ols,  # pyright: ignore[reportUnknownVariableType]
 )
+from scipy.stats import f
 
 from neurovoxel.utils import (
     MULTI_SES_OPTS,
@@ -45,6 +46,9 @@ class PermutedOLSResult(TypedDict):
     mass: NotRequired[np.typing.NDArray[Any]]
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
+    r_square: np.typing.NDArray[Any]
+    f_stat: np.typing.NDArray[Any]
+    f_pvalues: np.typing.NDArray[Any]
 
 
 def get_masker(
@@ -62,7 +66,7 @@ def get_masker(
     )
 
 
-def run_query(  # noqa: PLR0913
+def run_query(  # noqa: PLR0913, PLR0915
     query: str,
     root: Path,
     inference_terms: set[str],
@@ -129,14 +133,8 @@ def run_query(  # noqa: PLR0913
         # random_state for reproducibility.
         rng = np.random.default_rng(random_state)
         # Group by subject and pick one index per group
-        # FutureWarning: DataFrameGroupBy.apply operated on the grouping columns
-        # This behavior is deprecated, and in a future version of pandas the
-        # grouping columns will be excluded from the operation.
-        # Either pass `include_groups=False` to exclude the groupings or
-        # explicitly select the grouping columns after groupby to silence this
-        # warning.
-        chosen_idx = (
-            tbl.groupby("subject", sort=False)  # pyright: ignore[reportUnknownMemberType]
+        chosen_idx: np.typing.NDArray[Any] = (
+            tbl.groupby("subject", sort=False)[["session"]]  # pyright: ignore[reportUnknownMemberType]
             .apply(lambda g: rng.choice(g.index))
             .to_numpy()
         )
@@ -160,10 +158,26 @@ def run_query(  # noqa: PLR0913
     x_mat_mm = model_matrix(rhs, tbl, na_action="ignore")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     x_mat = x_mat_mm.to_numpy()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
+    predictor_names: np.typing.NDArray[Any] = np.asarray(x_mat_mm.columns)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    non_intercept = predictor_names != "Intercept"
+
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    if zero_terms:
+        message = (
+            "Analysis stopped: these predictor columns contain only zeros: "
+            + ", ".join(zero_terms)
+        )
+        raise ValueError(message)
+
     # Build y_mat from the image paths corresponding to the filtered `tbl` so
     # rows of y_mat align with rows of x_mat.
     y_mat = prepare_y_mat(
-        np.vstack(masker.fit_transform(tbl[lhs].values)),  # pyright: ignore[reportCallIssue, reportArgumentType, reportUnknownArgumentType, reportUnknownMemberType]
+        tbl[lhs].to_numpy(),  # pyright: ignore[reportUnknownMemberType]
+        masker,
         handle_zero_voxels,
         voxelwise_standardization,
     )
@@ -184,12 +198,45 @@ def run_query(  # noqa: PLR0913
     x_mat = x_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
     y_mat = y_mat[valid_rows, :]  # pyright: ignore[reportUnknownVariableType]
 
+    # Cancel analysis if any predictor columns contain only zeros after removing
+    # observations with missing predictors
+    all_zero = np.all(x_mat == 0, axis=0)  # pyright: ignore[reportUnknownArgumentType]
+    zero_terms = predictor_names[non_intercept & all_zero].tolist()
+
+    if zero_terms:
+        raise ValueError(
+            "Analysis stopped: these predictor columns contain only zeros "
+            "after removing observations with missing predictors: "
+            + ", ".join(zero_terms)
+        )
+
     # ------------------------------
     # Compute OLS beta coefficients
     # ------------------------------
     ols_model = OLSModel(x_mat)  # pyright: ignore[reportUnknownArgumentType]
     ols_results = ols_model.fit(y_mat)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     beta_coef = ols_results.theta  # shape: (n_predictors, n_voxels)
+
+    # MODEL DIAGNOSTICS
+
+    r_square_results = ols_results.r_square  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] # shape: (n_voxels,)
+    non_intercept = np.asarray(x_mat_mm.columns) != "Intercept"  # type: ignore  # noqa: PGH003
+
+    # Unavailable diagnostics default to NaN.
+    n_voxels = y_mat.shape[1]
+    f_stat = np.full(n_voxels, np.nan, dtype=np.float64)
+    f_pvalues = np.full(n_voxels, np.nan, dtype=np.float64)
+
+    if non_intercept.any():
+        contrast = np.eye(x_mat.shape[1])[non_intercept]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        f_results = ols_results.Fcontrast(contrast)  # pyright: ignore[reportUnknownMemberType]
+
+        f_stat = np.asarray(f_results.F).ravel()
+        f_pvalues = f.sf(  # pyright: ignore[reportUnknownMemberType]
+            f_stat,
+            f_results.df_num,  # pyright: ignore[reportUnknownMemberType]
+            f_results.df_den,  # pyright: ignore[reportUnknownMemberType]
+        )
 
     # ------------------------------
     # Run permutation-based inference
@@ -211,42 +258,47 @@ def run_query(  # noqa: PLR0913
 
     # Attach OLS betas explicitly
     res["beta"] = beta_coef[is_inference_term, :]  # pyright: ignore[reportIndexIssue]
+    res["r_square"] = r_square_results  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_stat"] = f_stat  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
+    res["f_pvalues"] = f_pvalues  # pyright: ignore[reportIndexIssue] # shape: (n_voxels,)
 
     # Include final table
     return res, tbl  # pyright: ignore[reportUnknownVariableType, reportReturnType]
 
 
 def prepare_y_mat(
-    y_mat: np.typing.NDArray[Any],
+    lhs_values: np.typing.ArrayLike,
+    masker: MultiNiftiMasker,
     handle_zero_voxels: str = ZERO_VOXEL_OPTS[0],  # pyright: ignore[reportUnknownParameterType, reportInvalidTypeForm])
     voxelwise_standardization: str = STANDARDIZATION_OPTS[0],
 ) -> np.typing.NDArray[Any]:
-    """Handle NaN (and zero) voxels and perform z-scoring."""
-    # There is a problem with the approach described below with "exclude"
-    # Permutation test statistics are not computed correctly -
-    # multiple comparison correction accounts for more voxels than needed,
-    # yielding a more conservative result
-    #
-    # "exclude" voxels (columns) where any observation is NaN
-    # Note about "excluding" voxels, throughout this script:
-    # we don't actually exclude to not mess with masker; we just set all
-    # observations for these voxels to 0, preventing any associations
+    """Exclude invalid voxels, update the masker, and standardize the data."""
+    y_mat = cast(
+        "np.typing.NDArray[Any]",
+        np.vstack(masker.fit_transform(lhs_values)),  # pyright: ignore[reportCallIssue, reportArgumentType, reportUnknownMemberType]
+    )
     exclude_col = np.isnan(y_mat).any(axis=0)  # pyright: ignore[reportUnknownArgumentType]
     if handle_zero_voxels == "exclude":
-        # "exclude" voxels (columns) where any observation is 0
+        # Exclude voxels (columns) where any observation is 0.
         exclude_col = np.logical_or(exclude_col, (y_mat == 0).any(axis=0))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    y_mat[:, exclude_col] = 0  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    keep_col = np.asarray(~exclude_col, dtype=bool)
+    if not keep_col.any():
+        msg = "No voxels remain after exclusion."
+        raise ValueError(msg)
+
+    if exclude_col.any():
+        # Map the original column positions into 3D before updating the masker.
+        updated_mask = masker.inverse_transform(keep_col.astype(np.uint8))  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        masker.set_params(mask_img=updated_mask).fit()  # pyright: ignore[reportUnknownMemberType]
+        y_mat = y_mat[:, keep_col]
 
     # center (or scale) voxelwise values by computing a single mean
     # (and a single standard deviation) across all voxels and observations
-    # compute stats only on non-excluded voxels
     # - center: x - mean
     # - scale (z-score): (x - mean) / sd
     if voxelwise_standardization in ["center", "scale"]:
-        vox_mean = np.mean(y_mat[:, ~exclude_col])  # pyright: ignore[reportUnknownArgumentType]
-        y_mat[:, ~exclude_col] -= vox_mean
+        y_mat -= np.mean(y_mat)
     if voxelwise_standardization == "scale":
-        vox_sd = np.std(y_mat[:, ~exclude_col])  # pyright: ignore[reportUnknownArgumentType]
-        y_mat[:, ~exclude_col] /= vox_sd
+        y_mat /= np.std(y_mat)
 
     return y_mat

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, sentinel
 from zipfile import ZipFile
 
+import numpy as np
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -381,6 +382,7 @@ def app_mocks(
         "_handle_query",
         "_save_analysis_results",
         "render_footer",
+        "generate_ols_results_pdf",
     )
     helpers: dict[str, Mock] = {name: Mock() for name in helper_names}
 
@@ -416,10 +418,21 @@ def test_main_success(  # noqa: PLR0913
     mocked_st, helpers = app_mocks
     config_file: Path | None = tmp_path / "config.json" if use_config else None
     config: dict[str, dict[str, str]] = {
-        "paths": {"bids_root": str(tmp_path / "dataset")},
+        "paths": {
+            "bids_root": str(tmp_path / "dataset"),
+            "outputdir": str(tmp_path),
+        },
         "analysis": {"query": "configured query"},
     }
     helpers["load_config"].return_value = config
+
+    mocked_st.session_state.paths["outputdir"] = str(tmp_path)
+
+    mocked_st.session_state.result = {
+        "r_square": np.array([0.25, 0.75], dtype=np.float64),
+        "f_stat": np.array([2.0, 3.0], dtype=np.float64),
+        "f_pvalues": np.array([0.1, 0.05], dtype=np.float64),
+    }
 
     mod.main(
         config_file=config_file,
