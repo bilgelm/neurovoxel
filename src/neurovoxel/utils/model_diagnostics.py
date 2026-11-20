@@ -1,4 +1,4 @@
-"""Model diagnostic metrics for OLS."""
+"""Reports for voxelwise ordinary and mixed model fit statistics."""
 
 from pathlib import Path
 from typing import TypedDict
@@ -10,7 +10,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 from nibabel.nifti1 import Nifti1Image
 from nilearn import plotting  # pyright: ignore[reportMissingTypeStubs]
-from nilearn.input_data import (  # pyright: ignore[reportMissingTypeStubs]
+from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
     MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
 )
 
@@ -29,14 +29,28 @@ def generate_ols_results_pdf(
     masker: MultiNiftiMasker,
     bg_img: Nifti1Image,
     output_path: Path,
+    *,
+    mixed: bool = False,
 ) -> None:
-    """Generate a PDF containing OLS results.
+    """Generate model fit maps and histograms (OLS-compatible entry point).
 
-    Include a brain map of R² values, tables of voxels with low R², and a
-    histogram of R² values.
+    Mixed reports identify the marginal and conditional R² and distinguish
+    the asymptotic Wald F statistic from an OLS F test.
     """
     with PdfPages(output_path) as output_pdf:
+        mixed = mixed or "r_square_conditional" in stat_values
+        labels = {
+            "r_square": "Marginal R² (fixed effects)" if mixed else "R²",
+            "r_square_conditional": "Conditional R² (fixed + random effects)",
+            "f_stat": "Asymptotic Wald F (df_den = infinity)"
+            if mixed
+            else "F statistic",
+            "f_pvalues": "Overall fixed-effect p-value (uncorrected)"
+            if mixed
+            else "Overall F-test p-value (uncorrected)",
+        }
         for key, value_dict in stat_values.items():
+            label = labels.get(key, key)
             values: np.typing.NDArray[np.float64] = value_dict["array"]
             img = unmask(values, masker, np.float64(-1))
             fig = Figure(figsize=(10, 4))
@@ -55,7 +69,7 @@ def generate_ols_results_pdf(
                 vmin=0,
                 vmax=value_dict["vmax"],
                 resampling_interpolation="nearest",
-                title=f"Voxel-wise {key} map",
+                title=f"Voxel-wise {label} map",
             )
 
             output_pdf.savefig(figure=fig, bbox_inches="tight")  # pyright: ignore[reportUnknownMemberType]
@@ -68,9 +82,9 @@ def generate_ols_results_pdf(
             finite_values = finite_values[np.isfinite(finite_values)]
             ax.hist(finite_values, bins=50)  # pyright: ignore[reportUnknownMemberType]
             ax.set(
-                xlabel=f"{key}",
+                xlabel=label,
                 ylabel="Number of voxels",
-                title=f"Distribution of voxel-wise {key}",
+                title=f"Distribution of voxel-wise {label}",
             )
 
             output_pdf.savefig(figure=fig, bbox_inches="tight")  # pyright: ignore[reportUnknownMemberType]

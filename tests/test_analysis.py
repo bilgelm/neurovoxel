@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import nibabel as nib
 import numpy as np
@@ -12,6 +12,9 @@ import pytest
 from nibabel.nifti1 import Nifti1Image
 from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
     MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
+)
+from scipy.stats import (  # pyright: ignore[reportMissingTypeStubs]
+    t as student_t,
 )
 
 import neurovoxel.utils.analysis as mod
@@ -50,6 +53,7 @@ def test_get_masker_passes_arguments_to_masker(
     assert calls.args == (mask_img,)
     assert calls.kwargs["smoothing_fwhm"] == SMOOTHING_FWHM
     assert calls.kwargs["n_jobs"] == n_jobs
+    assert calls.kwargs["reports"] is False
     np.testing.assert_array_equal(
         calls.kwargs["target_affine"], np.eye(3) * vox_size
     )
@@ -564,11 +568,13 @@ def test_run_query_tfce_with_reduced_masker(tmp_path: Path) -> None:
     residuals = kept_y - design @ coefficients
     residual_variance = np.sum(residuals**2, axis=0) / (n_subjects - 2)
     slope_variance = residual_variance * np.linalg.inv(design.T @ design)[1, 1]
+    assert "t" in result
     np.testing.assert_allclose(result["beta"], coefficients[1:])
     np.testing.assert_allclose(
         result["t"], coefficients[1:] / np.sqrt(slope_variance)
     )
 
+    assert "logp_max_t" in result
     assert "tfce" in result
     assert "logp_max_tfce" in result
     assert "h0_max_tfce" in result
@@ -891,3 +897,155 @@ def test_output_shape_tracks_retained_voxels(
 
     expected_columns = 2 if zero_opt == "exclude" else 3
     assert result.shape == (2, expected_columns)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "image ~ age + sex + nuisance",
+        "image ~ 0 + age + sex + nuisance",
+        "image ~ 1",
+    ],
+)
+def test_fdr_matches_independent_ols_and_bh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, query: str
+) -> None:
+    """Check two-sided FDR per term, nuisance rank and implicit intercept."""
+    rng = np.random.default_rng(17)
+    n_samples = 30
+    tbl = pd.DataFrame(
+        {
+            "subject": [str(i) for i in range(n_samples)],
+            "session": "1",
+            "age": rng.normal(size=n_samples),
+            "sex": rng.normal(size=n_samples),
+            "nuisance": rng.normal(size=n_samples),
+        }
+    )
+    # Duplicate nuisance columns exercise rank-based degrees of freedom.
+    if "nuisance" in query:
+        tbl["duplicate"] = tbl["nuisance"] * 2
+        query += " + duplicate"
+    y = rng.normal(size=(n_samples, 5))
+    y[:, 0] += np.asarray(tbl["age"]) * 2
+    images = [
+        SimpleNamespace(
+            path=f"{subject}.nii.gz",
+            get_entities=lambda subject=subject: {"sub": subject, "ses": "1"},
+        )
+        for subject in tbl["subject"]
+    ]
+    # Preserve matching rows after run_query's lexical subject sorting.
+    order = np.argsort(np.asarray(tbl["subject"]))
+
+    def prepare_y(*_args: object) -> np.typing.NDArray[np.float64]:
+        return y[order]
+
+    monkeypatch.setattr(mod, "prepare_y_mat", prepare_y)
+    terms = {"Intercept"} if query == "image ~ 1" else {"age", "sex"}
+    result, final_tbl = mod.run_query(
+        query,
+        tmp_path,
+        terms,
+        tbl,
+        cast("Any", images),
+        MultiNiftiMasker(),
+        n_perm=99,
+        n_jobs=1,
+        random_state=42,
+        tfce=True,
+        correction="fdr",
+    )
+    assert "logp_max_t" not in result
+    assert "tfce" not in result
+    assert "t" in result
+    assert "logp_fdr" in result
+    assert np.isfinite(result["logp_fdr"]).all()
+    for i, term in enumerate(result["tested_var_names"]):
+        nuisance = [] if terms == {"Intercept"} else ["nuisance", "duplicate"]
+        design = np.column_stack(
+            (
+                np.ones(n_samples),
+                final_tbl[nuisance].to_numpy(),
+                *([] if term == "Intercept" else [np.asarray(final_tbl[term])]),
+            )
+        )
+        coef = np.linalg.lstsq(design, y[order], rcond=None)[0]
+        df = n_samples - np.linalg.matrix_rank(design)
+        variance = np.sum((y[order] - design @ coef) ** 2, axis=0) / df
+        standard_error = np.sqrt(
+            np.linalg.pinv(design.T @ design)[-1, -1] * variance
+        )
+        expected_t = coef[-1] / standard_error
+        np.testing.assert_allclose(result["t"][i], expected_t, atol=1e-10)
+        p = 2 * student_t.sf(  # pyright: ignore[reportUnknownMemberType]
+            np.abs(expected_t), df
+        )
+        sort = np.argsort(p)
+        adjusted = np.minimum.accumulate(
+            (p[sort] * len(p) / np.arange(1, len(p) + 1))[::-1]
+        )[::-1]
+        expected = np.empty_like(p)
+        expected[sort] = np.minimum(adjusted, 1)
+        np.testing.assert_allclose(10 ** -result["logp_fdr"][i], expected)
+
+
+def test_run_query_rejects_unknown_correction(tmp_path: Path) -> None:
+    """Reject unsupported correction methods before loading images."""
+    with pytest.raises(
+        ValueError, match="Unknown multiple comparison correction"
+    ):
+        mod.run_query(
+            "image ~ age",
+            tmp_path,
+            {"age"},
+            pd.DataFrame(),
+            [],
+            MultiNiftiMasker(),
+            99,
+            1,
+            42,
+            tfce=False,
+            correction=cast("Any", "bad"),
+        )
+
+
+def test_fdr_finite_for_zero_p_and_no_effect() -> None:
+    """Bound log p-values when the t tail underflows and retain p=1."""
+    tested = np.arange(20, dtype=float)[:, None]
+    actual = mod.fdr_log_p_values(
+        mod.ols_p_values(
+            np.array([[0.0, 1e100, -1e100]]), tested, np.ones((20, 1))
+        )
+    )
+    assert np.isfinite(actual).all()
+    assert actual[0, 0] == 0
+    assert actual[0, 1] == actual[0, 2]
+
+
+def test_fdr_requires_residual_degrees_of_freedom() -> None:
+    """Reject a saturated model rather than return undefined p-values."""
+    with pytest.raises(
+        ValueError, match="positive residual degrees of freedom"
+    ):
+        mod.ols_p_values(np.ones((1, 2)), np.ones((3, 1)), np.eye(3))
+
+
+def test_masking_skips_unused_report_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not load or resample a preview before extracting voxel data."""
+    y = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    images, reference = make_preparation_inputs(y)
+    masker = mod.get_masker(reference.mask_img, 0.0, 1.0, 1)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+
+    def unexpected_preview(*_args: object) -> None:
+        msg = "Unused Nilearn report preview should not be generated"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "nilearn.maskers.multi_nifti_masker.compute_middle_image",
+        unexpected_preview,
+    )
+    actual = mod.prepare_y_mat(images, masker, "keep", "none")
+    np.testing.assert_allclose(actual, y)

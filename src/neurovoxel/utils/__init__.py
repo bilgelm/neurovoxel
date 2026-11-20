@@ -15,3 +15,7 @@ MULTI_SES_OPTS = SCHEMA["properties"]["analysis"]["properties"][
 STANDARDIZATION_OPTS = SCHEMA["properties"]["analysis"]["properties"][
     "voxelwise_standardization"
 ]["enum"]
+
+CORRECTION_OPTS = SCHEMA["properties"]["analysis"]["properties"]["correction"][
+    "enum"
+]

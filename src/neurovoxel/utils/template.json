@@ -30,6 +30,10 @@
                     "minimum": 1.0,
                     "maximum": 10.0
                 },
+                "correction": {
+                    "enum": ["fwe", "fdr"],
+                    "default": "fwe"
+                },
                 "n_perm": {
                     "type": "integer",
                     "minimum": 0,

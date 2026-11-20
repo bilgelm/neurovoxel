@@ -20,6 +20,11 @@ from formulaic import (
 )
 
 from neurovoxel.utils import SCHEMA
+from neurovoxel.utils.formula import split_formula
+from neurovoxel.utils.longitudinal import (
+    add_longitudinal_terms,
+    uses_longitudinal_terms,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,12 +119,13 @@ def parse_query(
 ) -> tuple[str, pd.Index]:
     """Parse query to extract the left and right hand side."""
     if "~" in query:
-        lhs, rhs = query.split("~")
-        lhs = lhs.strip()
-        rhs = rhs.strip()
+        formula = split_formula(query)
+        lhs, rhs = formula.lhs, formula.fixed
         if lhs not in allowed_lhs_values:
             msg = "Imaging outcome in query is invalid"
             raise ValueError(msg)
+        if uses_longitudinal_terms(formula):
+            rhs_df = add_longitudinal_terms(rhs_df)
         x_mat = model_matrix(rhs, rhs_df)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         return lhs, x_mat.columns  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 

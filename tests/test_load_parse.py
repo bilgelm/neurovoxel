@@ -159,3 +159,32 @@ def test_parse_query_no_tilda(tabular: pd.DataFrame) -> None:
     """Test parsing a query: invalid case."""
     with pytest.raises(ValueError, match="Invalid formula syntax"):
         mod.parse_query("invalid age", ["T1w", "FLAIR", "dwi"], tabular)
+
+
+@pytest.mark.parametrize("correction", ["fwe", "fdr", "invalid"])
+def test_config_correction(
+    tmp_path: Path, config: dict[str, dict[str, object]], correction: str
+) -> None:
+    """Validate the correction choice in saved configurations."""
+    config["analysis"]["correction"] = correction
+    config_file = tmp_path / "correction.json"
+    config_file.write_text(json.dumps(config))
+    if correction == "invalid":
+        with pytest.raises(ValidationError, match="correction"):
+            mod.load_config(config_file)
+    else:
+        assert (
+            mod.load_config(config_file)["analysis"]["correction"] == correction
+        )
+
+
+def test_parse_mixed_query_only_offers_fixed_effects(
+    tabular: pd.DataFrame,
+) -> None:
+    """Grouping variables and random slopes are not fixed-effect contrasts."""
+    tbl = tabular.assign(id="one", visit_time=1.0)
+    lhs, columns = mod.parse_query(
+        "T1w ~ age + (1 + visit_time | id)", ["T1w"], tbl
+    )
+    assert lhs == "T1w"
+    assert list(columns) == ["Intercept", "age"]

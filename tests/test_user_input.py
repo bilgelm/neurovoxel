@@ -322,6 +322,7 @@ def test_analysis_input_saves_initial_values(analysis_st: MagicMock) -> None:
     mod.render_analysis_param_input()
 
     assert analysis_st.session_state.analysis == {
+        "correction": "fwe",
         "smoothing_fwhm": 5.0,
         "voxel_size": 4.0,
         "n_perm": 10000,
@@ -670,3 +671,44 @@ def test_inference_choices_empty_rhs(analysis_st: MagicMock) -> None:
 
     assert analysis_st.session_state.analysis["inference_terms"] == set()
     analysis_st.checkbox.assert_not_called()
+
+
+def test_analysis_fdr_disables_permutation_controls(
+    analysis_st: MagicMock,
+) -> None:
+    """Load FDR configuration and disable FWE-only controls."""
+    analysis_st.session_state.analysis["correction"] = "fdr"
+    mod.render_analysis_param_input()
+    assert analysis_st.session_state.analysis["correction"] == "fdr"
+    widgets = {
+        call.kwargs["key"]: call.kwargs
+        for call in analysis_st.number_input.call_args_list
+        + analysis_st.checkbox.call_args_list
+    }
+    assert widgets["n_perm_input"]["disabled"] is True
+    assert widgets["tfce_input"]["disabled"] is True
+
+
+def test_mixed_input_keeps_all_sessions_and_requires_fdr(
+    analysis_st: MagicMock,
+) -> None:
+    """A longitudinal formula selects FDR and preserves every visit."""
+    analysis_st.session_state.analysis.update(
+        {
+            "query": "gm ~ age + (1 + age | subject)",
+            "correction": "fwe",
+            "handle_multiple_sessions": "first",
+        }
+    )
+    mod.render_analysis_param_input()
+    assert analysis_st.session_state.analysis["correction"] == "fdr"
+    assert (
+        analysis_st.session_state.analysis["handle_multiple_sessions"] == "all"
+    )
+    controls = {
+        call.kwargs["key"]: call.kwargs
+        for call in analysis_st.selectbox.call_args_list
+    }
+    assert controls["correction_input"]["disabled"] is True
+    assert controls["handle_multiple_sessions_input"]["disabled"] is True
+    analysis_st.warning.assert_not_called()

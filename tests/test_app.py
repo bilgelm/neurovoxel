@@ -235,7 +235,9 @@ def test_save_analysis_results(  # noqa: PLR0915
     mod._save_analysis_results(lhs, valid_outputdir)  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
 
     # Results are always rendered.
-    mocked_runner.assert_called_once_with(lhs)
+    mocked_runner.assert_called_once_with(
+        lhs, diagnostics_outputdir=tmp_path if valid_outputdir else None
+    )
     mocked_st.subheader.assert_called_once_with("Results")
     state.tbl.describe.assert_called_once_with()
     mocked_st.dataframe.assert_called_once_with(

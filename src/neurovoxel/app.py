@@ -4,7 +4,6 @@
 
 import argparse
 from pathlib import Path
-from typing import TypedDict
 
 import numpy as np
 import streamlit as st
@@ -31,7 +30,12 @@ from neurovoxel.utils.load_parse import (
     parse_layout,
     parse_query,
 )
+from neurovoxel.utils.mixed_diagnostics import (
+    DIAGNOSTICS_FILENAME,
+    SUMMARY_FILENAME,
+)
 from neurovoxel.utils.model_diagnostics import (
+    StatValues,
     generate_ols_results_pdf,
 )
 from neurovoxel.utils.output import (
@@ -77,7 +81,12 @@ def _handle_query() -> tuple[str | None, object | None]:
 
 def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
     """Render and optionally save the completed analysis."""
-    render_model_runner(lhs)
+    diagnostics_outputdir = (
+        Path(st.session_state.get("paths", {}).get("outputdir"))
+        if valid_outputdir
+        else None
+    )
+    render_model_runner(lhs, diagnostics_outputdir=diagnostics_outputdir)
     st.subheader("Results")
     summary_stats = st.session_state.tbl.describe()
     st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
@@ -118,7 +127,60 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             "tbl.csv",
             atlasreader_output,
         )
+        result = st.session_state.result
+        if isinstance(result, dict) and "mixed_diagnostics" in result:
+            output_parameters["mixed model diagnostics"] = {
+                "summary": SUMMARY_FILENAME,
+                "voxel_attempts": DIAGNOSTICS_FILENAME,
+            }
         save_parameters(outpath / "parameters.json", output_parameters)
+
+
+def _save_model_fit_report() -> None:
+    """Save available model fit maps and histograms for OLS or LME."""
+    stat_values: dict[str, StatValues] = {}
+
+    for key in (
+        "r_square",
+        "r_square_conditional",
+        "f_stat",
+        "f_pvalues",
+    ):
+        if key not in st.session_state.result:
+            continue
+        values = np.asarray(
+            st.session_state.result[key],
+            dtype=np.float64,
+        )
+        finite_values = values[np.isfinite(values)]
+
+        # Skip unavailable diagnostics, such as the overall
+        # F-test for an intercept-only model.
+        if finite_values.size == 0:
+            continue
+
+        stat_values[key] = {
+            "array": values,
+            "vmax": (
+                max(float(finite_values.max()), 1.0) if key == "f_stat" else 1.0
+            ),
+        }
+
+    if stat_values:
+        generate_ols_results_pdf(
+            stat_values=stat_values,
+            masker=st.session_state.masker,
+            bg_img=st.session_state.paths.get("template"),
+            mixed="mixed_diagnostics" in st.session_state.result,
+            output_path=(
+                Path(st.session_state.paths["outputdir"])
+                / (
+                    "lme_results.pdf"
+                    if "mixed_diagnostics" in st.session_state.result
+                    else "ols_results.pdf"
+                )
+            ),
+        )
 
 
 def main(
@@ -187,44 +249,7 @@ def main(
         _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
 
         if valid_outputdir:
-
-            class StatValues(TypedDict):
-                array: np.typing.NDArray[np.float64]
-                vmax: float
-
-            stat_values: dict[str, StatValues] = {}
-
-            for key in ("r_square", "f_stat", "f_pvalues"):
-                values = np.asarray(
-                    st.session_state.result[key],
-                    dtype=np.float64,
-                )
-                finite_values = values[np.isfinite(values)]
-
-                # Skip unavailable diagnostics, such as the overall
-                # F-test for an intercept-only model.
-                if finite_values.size == 0:
-                    continue
-
-                stat_values[key] = {
-                    "array": values,
-                    "vmax": (
-                        max(float(finite_values.max()), 1.0)
-                        if key == "f_stat"
-                        else 1.0
-                    ),
-                }
-
-            if stat_values:
-                generate_ols_results_pdf(
-                    stat_values=stat_values,
-                    masker=st.session_state.masker,
-                    bg_img=st.session_state.get("paths", {}).get("template"),
-                    output_path=(
-                        Path(st.session_state.paths["outputdir"])
-                        / "ols_results.pdf"
-                    ),
-                )
+            _save_model_fit_report()
 
     render_footer()
     if debug:

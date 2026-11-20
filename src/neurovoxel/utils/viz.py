@@ -24,6 +24,8 @@ from neurovoxel.utils.analysis import PermutedOLSResult
 # see: https://nilearn.github.io/stable/modules/generated/nilearn.mass_univariate.permuted_ols.html # noqa: E501
 STAT_OPTIONS_LITERAL = Literal[
     "beta",  # regression coefficient
+    "z",  # mixed-effects Wald z-statistic
+    "converged",  # mixed-effects fit/inference success (0 or 1)
     "t",  # t-statistic associated with the significance test
     "tfce",  # TFCE values associated with the significance test
     "size",  # cluster size values associated with the significance test
@@ -32,6 +34,7 @@ STAT_OPTIONS_LITERAL = Literal[
 STAT_OPTIONS = get_args(STAT_OPTIONS_LITERAL)
 
 P_OPTIONS_LITERAL = Literal[
+    "logp_fdr",  # -log10 Benjamini-Hochberg FDR-adjusted p-values
     "logp_max_t",  # -log10 family-wise corrected p-values
     "logp_max_tfce",  # -log10 family-wise corrected p-values
     "logp_max_size",  # -log10 family-wise corrected cluster-level p-values
@@ -39,6 +42,8 @@ P_OPTIONS_LITERAL = Literal[
 ]
 
 P_OPTIONS = get_args(P_OPTIONS_LITERAL)
+
+MODEL_FIT_OPTIONS = ("r_square", "r_square_conditional", "f_stat", "f_pvalues")
 
 
 def unmask(
@@ -176,7 +181,7 @@ def save_all_maps(
     masker: MultiNiftiMasker,
     imgvar: str,
 ) -> list[str]:
-    """Save all stat maps."""
+    """Save contrast maps and one map per available model fit statistic."""
     testedvars = result["tested_var_names"]
     outputdir.mkdir(parents=True, exist_ok=True)
 
@@ -195,5 +200,12 @@ def save_all_maps(
 
                 save_stat_map(filename, result, masker, idx, stat)
                 statistical_maps.append(filename.name)
+
+    for stat in MODEL_FIT_OPTIONS:
+        if stat in result:
+            name = stat.replace("_", "")
+            filename = outputdir / f"{imgvar}_stat-{name}_map.nii.gz"
+            nib_save(unmask(result[stat], masker, np.float64(np.nan)), filename)
+            statistical_maps.append(filename.name)
 
     return statistical_maps
