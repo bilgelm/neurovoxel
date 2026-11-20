@@ -5,6 +5,7 @@
 import argparse
 from pathlib import Path
 
+import numpy as np
 import streamlit as st
 from atlasreader import (
     create_output,  # pyright: ignore[reportUnknownVariableType]
@@ -32,6 +33,10 @@ from neurovoxel.utils.load_parse import (
 from neurovoxel.utils.mixed_diagnostics import (
     DIAGNOSTICS_FILENAME,
     SUMMARY_FILENAME,
+)
+from neurovoxel.utils.model_diagnostics import (
+    StatValues,
+    generate_ols_results_pdf,
 )
 from neurovoxel.utils.output import (
     parameter_output,
@@ -131,6 +136,53 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
         save_parameters(outpath / "parameters.json", output_parameters)
 
 
+def _save_model_fit_report() -> None:
+    """Save available model fit maps and histograms for OLS or LME."""
+    stat_values: dict[str, StatValues] = {}
+
+    for key in (
+        "r_square",
+        "r_square_conditional",
+        "f_stat",
+        "f_pvalues",
+    ):
+        if key not in st.session_state.result:
+            continue
+        values = np.asarray(
+            st.session_state.result[key],
+            dtype=np.float64,
+        )
+        finite_values = values[np.isfinite(values)]
+
+        # Skip unavailable diagnostics, such as the overall
+        # F-test for an intercept-only model.
+        if finite_values.size == 0:
+            continue
+
+        stat_values[key] = {
+            "array": values,
+            "vmax": (
+                max(float(finite_values.max()), 1.0) if key == "f_stat" else 1.0
+            ),
+        }
+
+    if stat_values:
+        generate_ols_results_pdf(
+            stat_values=stat_values,
+            masker=st.session_state.masker,
+            bg_img=st.session_state.paths.get("template"),
+            mixed="mixed_diagnostics" in st.session_state.result,
+            output_path=(
+                Path(st.session_state.paths["outputdir"])
+                / (
+                    "lme_results.pdf"
+                    if "mixed_diagnostics" in st.session_state.result
+                    else "ols_results.pdf"
+                )
+            ),
+        )
+
+
 def main(
     config_file: Path | None = None, autoload: bool = False, debug: bool = False
 ) -> None:
@@ -195,6 +247,9 @@ def main(
     run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
     if run_btn and lhs and rhs is not None:
         _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
+
+        if valid_outputdir:
+            _save_model_fit_report()
 
     render_footer()
     if debug:

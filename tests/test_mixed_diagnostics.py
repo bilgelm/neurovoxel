@@ -87,6 +87,7 @@ def test_optimizer_retries_with_fresh_model_and_keeps_warnings(
                 converged=not (first and failure == "nonconverged"),
                 cov_re=np.diag([0.2, np.nan if first else 0.1]),
                 scale=np.inf if first else 0.5,
+                cov_params=lambda: np.eye(3),
                 hist=[{"iterations": 7}],
             )
 
@@ -126,6 +127,9 @@ def test_optimizer_retries_with_fresh_model_and_keeps_warnings(
     assert accepted["warnings"] == []
     np.testing.assert_array_equal(fit.z, [3.0, 4.0])
     np.testing.assert_array_equal(fit.p, [0.01, 0.02])
+    np.testing.assert_allclose(fit.r_square, 0)
+    np.testing.assert_allclose(fit.r_square_conditional, 0.3 / 0.8)
+    np.testing.assert_array_equal(fit.fixed_effect_covariance, np.eye(2))
     assert all(attempt["elapsed_seconds"] >= 0 for attempt in fit.attempts)
     json.dumps(list(fit.attempts), allow_nan=False)
 
@@ -321,6 +325,9 @@ def test_success_with_warning_stops_retries(
                 tvalues=np.ones(2),
                 pvalues=np.full(2, 0.3),
                 converged=True,
+                cov_re=np.eye(2),
+                scale=0.5,
+                cov_params=lambda: np.eye(3),
             )
 
     monkeypatch.setattr(mod, "MixedLM", SuccessfulModel)

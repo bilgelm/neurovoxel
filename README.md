@@ -32,6 +32,66 @@ python -m neurovoxel-app
 neurovoxel-app
 ```
 
+### JSON configuration
+
+Copy [config.template.json](config.template.json), replace the example paths
+and query, then launch:
+
+```bash
+neurovoxel-app --config-file config.template.json
+```
+
+Add `--autoload` to load the BIDS dataset automatically and hide valid path
+inputs. Running the analysis still requires the **Run analysis** button.
+`--autoload` and `--debug` are command-line flags, not JSON settings.
+All JSON settings are optional; omit any you want to enter in the app.
+Relative paths resolve from the working directory where you launch the app.
+
+The `paths` object supports these inputs:
+
+| Key | Input |
+| --- | --- |
+| `bids_root` | BIDS derivatives directory |
+| `bids_cache` | Optional existing BIDS parquet cache file; leave empty or omit to skip |
+| `tabular` | CSV or TSV covariates file containing `subject` and `session` columns |
+| `template` | Brain template image used as a visualization background |
+| `mask` | Binary brain mask image specifying voxels to analyze |
+| `outputdir` | Empty output directory, or a directory the app can create |
+
+The `analysis` object supports these settings. The template uses the current
+defaults except for its example query:
+
+| Key | Default | Accepted values |
+| --- | --- | --- |
+| `query` | No query | Formula such as `gm ~ age + sex`; replace `gm` with a name from the image types table and use covariates from your table |
+| `smoothing_fwhm` | `5.0` | Number from 0 to 15, in mm |
+| `voxel_size` | `4.0` | Number from 1 to 10, in mm, isotropic |
+| `correction` | `"fwe"` | `"fwe"`, `"fdr"` |
+| `n_perm` | `10000` | Integer from 0 to 100000; used for FWE |
+| `tfce` | `false` | Boolean; used for FWE |
+| `handle_zero_voxels` | `"keep"` | `"keep"`, `"exclude"` |
+| `handle_multiple_sessions` | `"first"` | `"first"`, `"last"`, `"random"`, `"all"` |
+| `voxelwise_standardization` | `"scale"` | `"scale"`, `"center"`, `"none"` |
+| `n_jobs` | `-1` | Nonzero integer; `-1` uses all CPUs; configuration only |
+| `random_state` | `42` | Integer random seed; configuration only |
+
+Use decimal JSON numbers for `smoothing_fwhm` and `voxel_size`, as shown in
+the template, to match the Streamlit numeric controls. Mixed-effects queries
+automatically select `correction: "fdr"` and
+`handle_multiple_sessions: "all"`.
+
+Some settings cannot currently be prefilled from JSON: image names in the
+editable image types table, inference-term checkboxes, the **Run AtlasReader?**
+checkbox, and its cluster-size inputs. Set these in the app. Inference terms
+default to all non-intercept model terms.
+
+The internal schema (`src/neurovoxel/utils/template.json`) is a validation
+schema, not a runnable configuration example. It lists `random_seed` and
+`bids_config`, which the app does not use. Use `analysis.random_state` for
+the random seed. The app also reads `paths.bids_cache` and `analysis.n_jobs`,
+although these are not explicitly listed in that schema; validation allows
+additional properties.
+
 ### Multiple comparison correction
 
 Choose **FWE** (default) or **FDR** under **Advanced → Multiple comparison
@@ -129,6 +189,47 @@ slow; `analysis.n_jobs` controls parallel fitting. A progress bar appears
 immediately while images are prepared, then reports completed voxel fits,
 including unsuccessful fits. Estimates of random effects
 are fitted separately at each voxel and are not exported.
+
+#### Model fit indicators
+
+Mixed fits return one value per retained voxel for each of these indicators,
+independent of which fixed effects are selected for reporting:
+
+- `r_square`: Nakagawa **marginal R²**, the fraction of model variance explained
+  by fixed effects.
+- `r_square_conditional`: Nakagawa **conditional R²**, the fraction explained
+  by fixed and random effects together.
+- `f_stat`: an **asymptotic Wald F statistic** jointly testing that all
+  non-intercept fixed effects are zero. With `q` tested coefficients,
+  `F = beta.T @ inv(cov(beta)) @ beta / q` for that coefficient subset.
+- `f_pvalues`: uncorrected omnibus p-values from the equivalent chi-squared
+  test with `q` degrees of freedom, or F with `q` and infinite denominator
+  degrees of freedom. These do not use OLS residual degrees of freedom or
+  small-sample Satterthwaite/Kenward-Roger approximations. The omnibus test
+  does not test the random effects and does not replace per-term FDR results.
+
+R² uses the sample variance of fixed predictions `X beta`, the mean
+visit-specific random variance `mean(diag(Z cov_re Z.T))`, and the fitted
+residual variance. This includes random-slope variance and intercept/slope
+covariance, following [Johnson's random-slope extension][mixed-r2]. The R²
+denominator is the sum of those three variances; the marginal numerator is
+fixed variance, and the conditional numerator is fixed plus random variance.
+These variance-partition R² values differ from OLS residual-sum-of-squares R².
+
+Failed fits receive NaN fit indicators. Intercept-only fixed models have no
+omnibus slope test and receive NaN `f_stat` and `f_pvalues`. A nonfinite or
+non-positive-definite contrast covariance also leaves the omnibus test NaN
+without changing per-term inference or the convergence map.
+
+With an output directory, each indicator is saved once per model as a 3D map,
+such as `gm_stat-rsquare_map.nii.gz`, `gm_stat-rsquareconditional_map.nii.gz`,
+`gm_stat-fstat_map.nii.gz`, and `gm_stat-fpvalues_map.nii.gz`. Maps preserve NaN
+at failed voxels. Maps and histograms are included in `lme_results.pdf`;
+unavailable indicators are skipped. OLS continues to use `ols_results.pdf`.
+The mixed fit summary records the metric definitions and test degrees of
+freedom.
+
+[mixed-r2]: https://pmc.ncbi.nlm.nih.gov/articles/PMC4368045/
 
 [bh-fdr]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.false_discovery_control.html
 

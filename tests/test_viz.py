@@ -35,11 +35,22 @@ def test_unmask() -> None:
     )
     masker: Mock = Mock(spec=MultiNiftiMasker)
     masker.inverse_transform.return_value = expected_image
+    value_outside_mask: np.float64 = np.float64(0)
 
-    result: Nifti1Image = mod.unmask(masked_img, masker)
+    mask_data = np.zeros((3, 3, 3), dtype=np.uint8)
+    mask_data[0, 0, :3] = 1
+
+    masker.mask_img_ = Nifti1Image(mask_data, affine=np.eye(4))
+    result: Nifti1Image = mod.unmask(masked_img, masker, value_outside_mask)
 
     masker.inverse_transform.assert_called_once_with(masked_img)
-    assert result is expected_image
+    assert isinstance(result, Nifti1Image)
+
+    np.testing.assert_allclose(
+        result.get_fdata(),
+        expected_image.get_fdata(),
+        equal_nan=True,
+    )
 
 
 # test for basic_viz function

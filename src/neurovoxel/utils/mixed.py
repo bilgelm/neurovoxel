@@ -5,7 +5,7 @@
 import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from traceback import format_exc
 from typing import Any, cast
@@ -36,6 +36,7 @@ from neurovoxel.utils.mixed_diagnostics import (
     VoxelDiagnostic,
     summarize_mixed_diagnostics,
 )
+from neurovoxel.utils.mixed_statistics import mixed_r_squared, mixed_wald_f
 from neurovoxel.utils.results import AnalysisResult
 
 MIXED_OPTIMIZERS = ("lbfgs", "bfgs", "cg")
@@ -52,6 +53,9 @@ class VoxelFit:
     p: np.typing.NDArray[Any]
     converged: bool
     attempts: tuple[OptimizerAttempt, ...] = ()
+    r_square: float = np.nan
+    r_square_conditional: float = np.nan
+    fixed_effect_covariance: np.typing.NDArray[Any] | None = None
 
 
 class MixedModelFitError(ValueError):
@@ -134,7 +138,23 @@ def _fit_attempt(
             if history and "iterations" in history[-1]:
                 attempt["iterations"] = int(history[-1]["iterations"])
             if attempt["status"] == "success":
-                accepted = VoxelFit(beta, z, p, converged=True)
+                marginal, conditional = mixed_r_squared(
+                    x @ beta,
+                    random,
+                    np.asarray(fit.cov_re, dtype=float),
+                    float(fit.scale),
+                )
+                accepted = VoxelFit(
+                    beta,
+                    z,
+                    p,
+                    converged=True,
+                    r_square=marginal,
+                    r_square_conditional=conditional,
+                    fixed_effect_covariance=np.asarray(
+                        fit.cov_params(), dtype=float
+                    )[: x.shape[1], : x.shape[1]],
+                )
         except (
             np.linalg.LinAlgError,
             ValueError,
@@ -162,13 +182,7 @@ def _fit_voxel(
         accepted, attempt = _fit_attempt(optimizer, y, x, random, groups)
         attempts.append(attempt)
         if accepted is not None:
-            return VoxelFit(
-                accepted.beta,
-                accepted.z,
-                accepted.p,
-                converged=True,
-                attempts=tuple(attempts),
-            )
+            return replace(accepted, attempts=tuple(attempts))
     missing = np.full(x.shape[1], np.nan)
     conservative = np.full_like(missing, 1.0)
     return VoxelFit(
@@ -334,6 +348,9 @@ def fit_mixed_model(
     The rows of y must match design.table, including preprocessing restricted
     to those visits. Wald tests use the asymptotic normal distribution.
     Failed voxels receive p=1 before FDR, and NaN beta/z values.
+    Model diagnostics are one value per voxel, independent of selected terms:
+    marginal/conditional R² and an asymptotic joint Wald F test of all
+    non-intercept fixed effects. Failed voxels have NaN model diagnostics.
     The optional callback receives (completed, total) voxel counts on the
     calling thread, including failed fits, beginning at zero.
     """
@@ -371,6 +388,17 @@ def fit_mixed_model(
         "random": design.formula.random,
         "group": design.formula.group,
     }
+    diagnostics["summary"]["model_fit_statistics"] = {
+        "r_square": "Nakagawa marginal R2 (fixed effects)",
+        "r_square_conditional": "Nakagawa conditional R2 (fixed + random)",
+        "fixed_variance": "sample variance of X beta (ddof=1)",
+        "random_variance": "mean(diag(Z cov_re Z.T)) over retained visits",
+        "f_stat": "joint non-intercept fixed-effect Wald chi2 / df_num",
+        "f_df_num": int(np.count_nonzero(design.fixed.columns != "Intercept")),
+        "f_df_den": "infinity (asymptotic)",
+        "f_pvalues": "uncorrected chi2 survival probability",
+        "failed_or_unavailable": "NaN",
+    }
     if diagnostics_callback is not None:
         diagnostics_callback(diagnostics)
     summary = diagnostics["summary"]
@@ -392,6 +420,15 @@ def fit_mixed_model(
             RuntimeWarning,
             stacklevel=2,
         )
+    non_intercept = np.asarray(design.fixed.columns != "Intercept")
+    omnibus = np.asarray(
+        [
+            mixed_wald_f(fit.beta, fit.fixed_effect_covariance, non_intercept)
+            if fit.converged
+            else (np.nan, np.nan)
+            for fit in fits
+        ]
+    )
     result: AnalysisResult = {
         "tested_var_names": design.fixed.columns[selected].to_list(),
         "beta": np.asarray([fit.beta for fit in fits]).T[selected],
@@ -402,6 +439,12 @@ def fit_mixed_model(
         "converged": np.tile(
             [fit.converged for fit in fits], (int(selected.sum()), 1)
         ).astype(float),
+        "r_square": np.asarray([fit.r_square for fit in fits]),
+        "r_square_conditional": np.asarray(
+            [fit.r_square_conditional for fit in fits]
+        ),
+        "f_stat": omnibus[:, 0],
+        "f_pvalues": omnibus[:, 1],
     }
     result["mixed_diagnostics"] = diagnostics
     return result, design.table

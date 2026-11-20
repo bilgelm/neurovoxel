@@ -4,7 +4,7 @@
 
 from pathlib import Path
 from re import sub
-from typing import Any, Literal, get_args
+from typing import Any, Literal, cast, get_args
 
 import numpy as np
 from nanslice import Layer
@@ -43,12 +43,30 @@ P_OPTIONS_LITERAL = Literal[
 
 P_OPTIONS = get_args(P_OPTIONS_LITERAL)
 
+MODEL_FIT_OPTIONS = ("r_square", "r_square_conditional", "f_stat", "f_pvalues")
+
 
 def unmask(
-    masked_img: np.typing.NDArray[Any], masker: MultiNiftiMasker
+    masked_img: np.typing.NDArray[Any],
+    masker: MultiNiftiMasker,
+    value_outside_mask: np.float64,
 ) -> Nifti1Image:
-    """Convert a rasterized masked image back to an image."""
-    return masker.inverse_transform(masked_img)
+    """Reconstruct an image, optionally filling outside-mask voxels with NaN."""
+    img = cast("Nifti1Image", masker.inverse_transform(masked_img))
+
+    mask_img = masker.mask_img_
+    if not isinstance(mask_img, Nifti1Image):
+        msg = "masker.mask_img_ must be a Nifti1Image."
+        raise TypeError(msg)
+
+    data = img.get_fdata()  # Floating-point data supports NaN
+    outside_mask = mask_img.get_fdata() == 0
+    data[outside_mask] = value_outside_mask
+
+    header = img.header.copy()
+    header.set_data_dtype(data.dtype)
+
+    return Nifti1Image(data, img.affine, header)
 
 
 def basic_viz(
@@ -62,7 +80,7 @@ def basic_viz(
     if stat in result:
         idx = result["tested_var_names"].index(term)
         return plot_stat_map(
-            unmask(result[stat][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            unmask(result[stat][idx, :], masker, 0),  # pyright: ignore[reportTypedDictNotRequiredAccess]
             **kwargs,
         )
     msg = f"{stat} is not in results"
@@ -80,7 +98,7 @@ def basic_interactive_viz(  # pyright: ignore[]
     if stat in result:
         idx = result["tested_var_names"].index(term)
         return view_img(
-            unmask(result[stat][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            unmask(result[stat][idx, :], masker, 0),  # pyright: ignore[reportTypedDictNotRequiredAccess]
             **kwargs,
         )
     msg = f"{stat} is not in results"
@@ -107,10 +125,10 @@ def nanslice_overlay(  # noqa: PLR0913
         raise ValueError(msg)
 
     idx = result["tested_var_names"].index(term)
-    beta_img = unmask(result["beta"][idx, :], masker)
+    beta_img = unmask(result["beta"][idx, :], masker, 0)
     alpha_img = math_img(
         "1 - np.power(10, -img)",
-        img=unmask(result[p_var][idx, :], masker),  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        img=unmask(result[p_var][idx, :], masker, 0),  # pyright: ignore[reportTypedDictNotRequiredAccess]
     )
     contour_level = 1 - p_thresh
 
@@ -154,7 +172,7 @@ def save_stat_map(
     stat: Literal[STAT_OPTIONS_LITERAL, P_OPTIONS_LITERAL] = "t",
 ) -> None:
     """Save stat map."""
-    nib_save(unmask(result[stat][idx, :], masker), filename)
+    nib_save(unmask(result[stat][idx, :], masker, 0), filename)
 
 
 def save_all_maps(
@@ -163,7 +181,7 @@ def save_all_maps(
     masker: MultiNiftiMasker,
     imgvar: str,
 ) -> list[str]:
-    """Save all stat maps."""
+    """Save contrast maps and one map per available model fit statistic."""
     testedvars = result["tested_var_names"]
     outputdir.mkdir(parents=True, exist_ok=True)
 
@@ -182,5 +200,12 @@ def save_all_maps(
 
                 save_stat_map(filename, result, masker, idx, stat)
                 statistical_maps.append(filename.name)
+
+    for stat in MODEL_FIT_OPTIONS:
+        if stat in result:
+            name = stat.replace("_", "")
+            filename = outputdir / f"{imgvar}_stat-{name}_map.nii.gz"
+            nib_save(unmask(result[stat], masker, np.float64(np.nan)), filename)
+            statistical_maps.append(filename.name)
 
     return statistical_maps

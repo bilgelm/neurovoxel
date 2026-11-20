@@ -1,0 +1,23 @@
+{
+    "paths": {
+        "bids_root": "/path/to/bids/derivatives",
+        "bids_cache": "",
+        "tabular": "/path/to/covariates.tsv",
+        "template": "/path/to/template.nii.gz",
+        "mask": "/path/to/mask.nii.gz",
+        "outputdir": "/path/to/output"
+    },
+    "analysis": {
+        "query": "gm ~ age + sex",
+        "smoothing_fwhm": 5.0,
+        "voxel_size": 4.0,
+        "correction": "fwe",
+        "n_perm": 10000,
+        "tfce": false,
+        "handle_zero_voxels": "keep",
+        "handle_multiple_sessions": "first",
+        "voxelwise_standardization": "scale",
+        "n_jobs": -1,
+        "random_state": 42
+    }
+}

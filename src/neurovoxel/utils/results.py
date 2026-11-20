@@ -28,6 +28,10 @@ class AnalysisResult(TypedDict):
     mass: NotRequired[np.typing.NDArray[Any]]
     logp_max_mass: NotRequired[np.typing.NDArray[Any]]
     h0_max_mass: NotRequired[np.typing.NDArray[Any]]
+    r_square: np.typing.NDArray[Any]
+    r_square_conditional: NotRequired[np.typing.NDArray[Any]]
+    f_stat: np.typing.NDArray[Any]
+    f_pvalues: np.typing.NDArray[Any]
 
 
 # Compatibility with the original result type name.

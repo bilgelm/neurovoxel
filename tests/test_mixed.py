@@ -56,7 +56,7 @@ def longitudinal() -> tuple[pd.DataFrame, np.typing.NDArray[np.float64]]:
 
 
 @pytest.mark.parametrize("random", ["1", "1 + visit_time", "0 + visit_time"])
-def test_longitudinal_matches_statsmodels(
+def test_longitudinal_matches_statsmodels(  # noqa: PLR0915
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
@@ -121,6 +121,9 @@ def test_longitudinal_matches_statsmodels(
     expected_beta: list[Any] = []
     expected_z: list[Any] = []
     expected_p: list[Any] = []
+    expected_r2: list[tuple[float, float]] = []
+    expected_f: list[float] = []
+    expected_fp: list[float] = []
     for column in y[keep].T:
         data = expected_tbl.assign(outcome=column)
         direct = (
@@ -136,6 +139,19 @@ def test_longitudinal_matches_statsmodels(
         expected_beta.append(direct.fe_params)
         expected_z.append(direct.tvalues[:2])
         expected_p.append(direct.pvalues[:2])
+        fixed_variance = np.var(direct.model.exog @ direct.fe_params, ddof=1)
+        random_variance = np.diag(
+            direct.model.exog_re @ direct.cov_re @ direct.model.exog_re.T
+        ).mean()
+        total = fixed_variance + random_variance + direct.scale
+        expected_r2.append(
+            (fixed_variance / total, (fixed_variance + random_variance) / total)
+        )
+        contrast = np.zeros((1, len(direct.params)))
+        contrast[0, 1] = 1
+        omnibus = direct.wald_test(contrast, use_f=False, scalar=True)
+        expected_f.append(float(omnibus.statistic))
+        expected_fp.append(float(omnibus.pvalue))
     np.testing.assert_allclose(
         result["beta"], np.asarray(expected_beta).T, rtol=1e-6
     )
@@ -146,6 +162,15 @@ def test_longitudinal_matches_statsmodels(
         rtol=1e-6,
     )
     assert result["converged"].all()
+    np.testing.assert_allclose(
+        result["r_square"], np.asarray(expected_r2)[:, 0]
+    )
+    assert "r_square_conditional" in result
+    np.testing.assert_allclose(
+        result["r_square_conditional"], np.asarray(expected_r2)[:, 1]
+    )
+    np.testing.assert_allclose(result["f_stat"], expected_f)
+    np.testing.assert_allclose(result["f_pvalues"], expected_fp)
 
 
 def test_mixed_rejects_fwe(tmp_path: Path) -> None:
@@ -202,6 +227,9 @@ def test_failed_voxel_is_conservative(
     np.testing.assert_array_equal(result["converged"], [[1, 0]])
     assert np.isnan(result["z"][0, 1])
     np.testing.assert_allclose(10.0 ** -result["logp_fdr"], [[0.02, 1]])
+    assert "r_square_conditional" in result
+    for key in ("r_square", "r_square_conditional", "f_stat", "f_pvalues"):
+        assert np.isnan(result[key][1])
 
 
 def test_all_voxels_fail(
@@ -612,6 +640,55 @@ def test_baseline_recomputed_after_transform_exclusions() -> None:
     np.testing.assert_allclose(design.table["time"], np.tile(np.arange(5), 3))
     np.testing.assert_allclose(design.fixed["time"], design.table["time"])
     np.testing.assert_allclose(design.random["time"], design.table["time"])
+
+
+@pytest.mark.parametrize("intercept", [True, False])
+def test_model_diagnostics_independent_of_reported_terms(
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+    intercept: bool,
+) -> None:
+    """Test all slopes despite reporting one, with or without an intercept."""
+    tbl, y = longitudinal
+    fixed = "age + visit_time" if intercept else "0 + age + visit_time"
+    design = mod.prepare_mixed_design(
+        split_formula(f"image ~ {fixed} + (1 + visit_time | id)"), tbl, {"age"}
+    )
+    result, _ = mod.fit_mixed_model(design, y[:, :1], 1)
+    direct = cast(
+        "Any",
+        MixedLM(
+            y[:, 0],
+            design.fixed.to_numpy(),
+            design.groups,
+            exog_re=design.random.to_numpy(),
+        ),
+    ).fit(reml=True, method="lbfgs", disp=False)
+    contrast = np.zeros((2, len(direct.params)))
+    contrast[:, int(intercept) : int(intercept) + 2] = np.eye(2)
+    expected = direct.wald_test(contrast, use_f=False, scalar=True)
+    assert result["tested_var_names"] == ["age"]
+    assert result["f_stat"].shape == (1,)
+    np.testing.assert_allclose(result["f_stat"][0], expected.statistic / 2)
+    np.testing.assert_allclose(result["f_pvalues"][0], expected.pvalue)
+
+
+def test_intercept_only_mixed_model_diagnostics(
+    longitudinal: tuple[pd.DataFrame, np.typing.NDArray[np.float64]],
+) -> None:
+    """Retain variance partitions without inventing an overall slope test."""
+    tbl, y = longitudinal
+    result, _ = mod.fit_mixed_model(
+        mod.prepare_mixed_design(
+            split_formula("image ~ 1 + (1 | id)"), tbl, {"Intercept"}
+        ),
+        y[:, :1],
+        1,
+    )
+    np.testing.assert_allclose(result["r_square"][0], 0, atol=1e-20)
+    assert "r_square_conditional" in result
+    assert 0 < result["r_square_conditional"][0] < 1
+    assert np.isnan(result["f_stat"]).all()
+    assert np.isnan(result["f_pvalues"]).all()
 
 
 def test_derived_exclusions_stop_when_no_visits_remain() -> None:
