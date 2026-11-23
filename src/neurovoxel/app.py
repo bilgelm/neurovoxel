@@ -87,8 +87,9 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
         outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
         analysis = st.session_state.analysis.copy()
         analysis.pop("inference_terms", None)
+        nifti_output = outpath / "Main_OLS_Results"
         statistical_maps = save_all_maps(
-            outpath,
+            nifti_output,
             st.session_state.result,
             st.session_state.masker,
             lhs,
@@ -98,7 +99,7 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             atlasreader_output_path: Path = outpath / "atlasreader_output"
             atlasreader_output_path.mkdir(exist_ok=True)
             create_output(
-                outpath / statistical_maps[1],
+                nifti_output / statistical_maps[1],
                 cluster_extent=st.session_state.analysis.get("cluster_size"),
                 outdir=atlasreader_output_path,
             )
@@ -222,7 +223,7 @@ def main(
                     bg_img=st.session_state.get("paths", {}).get("template"),
                     output_path=(
                         Path(st.session_state.paths["outputdir"])
-                        / "ols_results.pdf"
+                        / "Model_Diagnostic_Results.pdf"
                     ),
                 )
 

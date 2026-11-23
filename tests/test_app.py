@@ -255,8 +255,10 @@ def test_save_analysis_results(  # noqa: PLR0915
         mocked_save_parameters.assert_not_called()
         return
 
+    nifti_output_path: Path = tmp_path / "Main_OLS_Results"
+
     mocked_save_maps.assert_called_once_with(
-        tmp_path,
+        nifti_output_path,
         sentinel.result,
         sentinel.masker,
         lhs,
@@ -272,9 +274,9 @@ def test_save_analysis_results(  # noqa: PLR0915
         atlas_output_path: Path = tmp_path / "atlasreader_output"
         assert atlas_output_path.is_dir()
         mocked_create_output.assert_called_once_with(
-            tmp_path / "statistic.nii.gz",
+            nifti_output_path / "statistic.nii.gz",
             cluster_extent=10,
-            outdir=atlas_output_path,
+            outdir=tmp_path / "atlasreader_output",
         )
         expected_atlas_output = ["clusters.csv"]
     else:
