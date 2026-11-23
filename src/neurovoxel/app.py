@@ -3,8 +3,12 @@
 # pyright: reportMissingTypeStubs=false
 
 import argparse
+import json
+from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TypedDict
+from zipfile import ZipFile
 
 import numpy as np
 import streamlit as st
@@ -75,16 +79,27 @@ def _handle_query() -> tuple[str | None, object | None]:
     return lhs, rhs
 
 
-def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
-    """Render and optionally save the completed analysis."""
+def _save_analysis_results(
+    lhs: str,
+    valid_outputdir: bool,
+    output_option: bool = False,
+) -> None:
+    """Render results and optionally save or package the completed analysis."""
     render_model_runner(lhs)
     st.subheader("Results")
     summary_stats = st.session_state.tbl.describe()
     st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
     render_visualization(st.session_state.analysis["inference_terms"])
 
-    if valid_outputdir:
-        outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
+    if output_option and not valid_outputdir:
+        return
+
+    with TemporaryDirectory() as temporary_directory:
+        outpath = (
+            Path(st.session_state.get("paths", {}).get("outputdir"))
+            if output_option
+            else Path(temporary_directory)
+        )
         analysis = st.session_state.analysis.copy()
         analysis.pop("inference_terms", None)
         statistical_maps = save_all_maps(
@@ -94,8 +109,9 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
             lhs,
         )
 
+        atlasreader_output_path: Path | None = None
         if st.session_state.space_verification_input:
-            atlasreader_output_path: Path = outpath / "atlasreader_output"
+            atlasreader_output_path = outpath / "atlasreader_output"
             atlasreader_output_path.mkdir(exist_ok=True)
             create_output(
                 outpath / statistical_maps[1],
@@ -106,23 +122,63 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
                 file_path.name
                 for file_path in atlasreader_output_path.glob("*")
             ]
-
         else:
             atlasreader_output = None
 
-        st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
+        paths = st.session_state.paths.copy()
+        if not output_option:
+            paths.pop("outputdir", None)
         output_parameters = parameter_output(
-            st.session_state.paths,
+            paths,
             analysis,
             statistical_maps,
             "tbl.csv",
             atlasreader_output,
         )
-        save_parameters(outpath / "parameters.json", output_parameters)
+
+        buffer = BytesIO()
+        if output_option:
+            save_parameters(outpath / "parameters.json", output_parameters)
+            st.session_state.tbl.to_csv(outpath / "tbl.csv", index=False)
+        else:
+            with ZipFile(buffer, mode="w") as archive:
+                archive.writestr(
+                    "parameters.json",
+                    json.dumps(output_parameters, indent=2),
+                )
+                archive.writestr(
+                    "tbl.csv",
+                    st.session_state.tbl.to_csv(index=False),
+                )
+                for filename in statistical_maps:
+                    archive.write(outpath / filename, arcname=filename)
+                if atlasreader_output_path is not None:
+                    for file_path in atlasreader_output_path.rglob("*"):
+                        if file_path.is_file():
+                            archive.write(
+                                file_path,
+                                arcname=(
+                                    Path("atlasreader_output")
+                                    / file_path.relative_to(
+                                        atlasreader_output_path
+                                    )
+                                ),
+                            )
+
+    if not output_option:
+        st.download_button(
+            label="Download results",
+            data=buffer.getvalue(),
+            file_name="neurovoxel_results.zip",
+            mime="application/zip",
+        )
 
 
 def main(
-    config_file: Path | None = None, autoload: bool = False, debug: bool = False
+    config_file: Path | None = None,
+    autoload: bool = False,
+    debug: bool = False,
+    output_option: bool = False,
 ) -> None:
     """Main entry point for the NeuroVoxel Streamlit app.
 
@@ -163,7 +219,9 @@ def main(
                 _load_dataset()
 
             render_table_input(autoload)
-            valid_outputdir = render_outputdir_input(autoload)
+            valid_outputdir = (
+                render_outputdir_input(autoload) if output_option else False
+            )
         with col2:
             render_template_input("Brain template image", "template", autoload)
             valid_mask = render_template_input(
@@ -182,9 +240,18 @@ def main(
 
     lhs, rhs = _handle_query()
 
-    run_btn = st.button("Run analysis", disabled=not (lhs and valid_mask))
+    run_btn = st.button(
+        "Run analysis",
+        disabled=not (
+            lhs and valid_mask and (not output_option or valid_outputdir)
+        ),
+    )
     if run_btn and lhs and rhs is not None:
-        _save_analysis_results(lhs, valid_outputdir=valid_outputdir)
+        _save_analysis_results(
+            lhs,
+            valid_outputdir=valid_outputdir,
+            output_option=output_option,
+        )
 
         if valid_outputdir:
 
@@ -256,6 +323,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug mode",
     )
+    parser.add_argument(
+        "--output-option",
+        action="store_true",
+        help="Enable output option",
+    )
     return parser.parse_args()
 
 
@@ -265,4 +337,5 @@ if __name__ == "__main__":
         config_file=args.config_file,
         autoload=args.autoload,
         debug=args.debug,
+        output_option=args.output_option,
     )

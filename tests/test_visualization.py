@@ -22,6 +22,7 @@ def test_render_visualization(
         return paths if key == "paths" else default
 
     fake_st = MagicMock()
+    fake_st.columns.return_value = (MagicMock(), MagicMock())
     fake_st.session_state = SimpleNamespace(
         result=result,
         masker=masker,
