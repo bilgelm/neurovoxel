@@ -90,7 +90,9 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
     render_visualization(
         st.session_state.analysis["inference_terms"],
         pdf_path=(
-            outpath / "visualizations.pdf" if outpath is not None else None
+            outpath / "Main_Result_Visualizations.pdf"
+            if outpath is not None
+            else None
         ),
     )
 

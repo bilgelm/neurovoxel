@@ -243,7 +243,7 @@ def test_save_analysis_results(  # noqa: PLR0915
         width="content",
     )
     expected_pdf_path = (
-        tmp_path / "visualizations.pdf" if valid_outputdir else None
+        tmp_path / "Main_Result_Visualizations.pdf" if valid_outputdir else None
     )
     mocked_visualization.assert_called_once_with(
         ["term_a"],
