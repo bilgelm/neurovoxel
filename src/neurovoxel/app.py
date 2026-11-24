@@ -81,10 +81,23 @@ def _save_analysis_results(lhs: str, valid_outputdir: bool) -> None:
     st.subheader("Results")
     summary_stats = st.session_state.tbl.describe()
     st.dataframe(summary_stats, width="content")  # pyright: ignore[reportUnknownMemberType]
-    render_visualization(st.session_state.analysis["inference_terms"])
+
+    outpath = (
+        Path(st.session_state.get("paths", {}).get("outputdir"))
+        if valid_outputdir
+        else None
+    )
+    render_visualization(
+        st.session_state.analysis["inference_terms"],
+        pdf_path=(
+            outpath / "visualizations.pdf" if outpath is not None else None
+        ),
+    )
 
     if valid_outputdir:
-        outpath = Path(st.session_state.get("paths", {}).get("outputdir"))
+        if outpath is None:
+            msg = "A valid output directory is required for saving results."
+            raise ValueError(msg)
         analysis = st.session_state.analysis.copy()
         analysis.pop("inference_terms", None)
         statistical_maps = save_all_maps(

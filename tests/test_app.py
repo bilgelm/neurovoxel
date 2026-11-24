@@ -242,7 +242,13 @@ def test_save_analysis_results(  # noqa: PLR0915
         sentinel.summary_stats,
         width="content",
     )
-    mocked_visualization.assert_called_once_with(["term_a"])
+    expected_pdf_path = (
+        tmp_path / "visualizations.pdf" if valid_outputdir else None
+    )
+    mocked_visualization.assert_called_once_with(
+        ["term_a"],
+        pdf_path=expected_pdf_path,
+    )
 
     # Removing inference terms from the saved copy must not alter state.
     assert state.analysis == analysis
