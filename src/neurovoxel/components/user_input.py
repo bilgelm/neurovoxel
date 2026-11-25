@@ -155,6 +155,16 @@ def render_analysis_param_input() -> None:
         key="smoothing_fwhm_input",
     )
 
+    def update_cluster_volume_for_voxel_size() -> None:
+        """Update the physical cluster volume when voxel size changes."""
+        if "cluster_size_voxels" not in st.session_state:
+            return
+
+        voxel_volume = st.session_state["voxel_size_input"] ** 3
+        st.session_state["cluster_size_mm3"] = (
+            st.session_state["cluster_size_voxels"] * voxel_volume
+        )
+
     st.session_state.analysis["voxel_size"] = st.number_input(
         "Voxel size of statistical analysis space (mm, isotropic)",
         min_value=1.0,
@@ -162,6 +172,7 @@ def render_analysis_param_input() -> None:
         value=st.session_state.get("analysis", {}).get("voxel_size", 4.0),
         step=0.5,
         key="voxel_size_input",
+        on_change=update_cluster_volume_for_voxel_size,
     )
 
     st.session_state.analysis["n_perm"] = st.number_input(
@@ -229,15 +240,21 @@ def render_analysis_param_input() -> None:
         st.markdown("Minimum cluster size for AtlasReader reporting")
 
         def voxels_to_mm3() -> None:
-            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            voxel_volume = st.session_state["voxel_size_input"] ** 3
             st.session_state["cluster_size_mm3"] = (
                 st.session_state["cluster_size_voxels"] * voxel_volume
             )
 
         def mm3_to_voxels() -> None:
-            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            voxel_volume = st.session_state["voxel_size_input"] ** 3
             st.session_state["cluster_size_voxels"] = ceil(
                 st.session_state["cluster_size_mm3"] / voxel_volume
+            )
+
+        if "cluster_size_mm3" not in st.session_state:
+            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            st.session_state["cluster_size_mm3"] = (
+                st.session_state.get("cluster_size_voxels", 0) * voxel_volume
             )
 
         subcol1, subcol2 = st.columns(2)

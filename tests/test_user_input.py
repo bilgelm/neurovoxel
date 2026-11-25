@@ -451,6 +451,9 @@ def test_analysis_input_atlasreader_conversions(analysis_st: MagicMock) -> None:
     }
 
     # Default voxel size is 4 mm: each voxel occupies 4³ = 64 mm³.
+    # Streamlit stores the value of keyed widgets in session state; mirror that
+    # behavior because this test invokes callbacks directly.
+    state["voxel_size_input"] = 4.0
     widget_arguments["cluster_size_voxels"]["on_change"]()
     expected_cluster_size_mm3 = 2 * 4**3
     assert state["cluster_size_mm3"] == expected_cluster_size_mm3
