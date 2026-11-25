@@ -146,22 +146,47 @@ def render_analysis_param_input() -> None:
                 f"{bids_cache}"
             )
 
-    st.session_state.analysis["smoothing_fwhm"] = st.number_input(
+    smoothing_options = [4.0, 6.0, 8.0, 12.0]
+    current_smoothing_fwhm = st.session_state.get("analysis", {}).get(
+        "smoothing_fwhm", 4.0
+    )
+    current_smoothing_fwhm = (
+        current_smoothing_fwhm
+        if current_smoothing_fwhm in smoothing_options
+        else 4.0
+    )
+
+    st.session_state.analysis["smoothing_fwhm"] = st.selectbox(
         "Smoothing FWHM (mm) for isotropic Gaussian",
-        min_value=0.0,
-        max_value=15.0,
-        value=st.session_state.get("analysis", {}).get("smoothing_fwhm", 5.0),
-        step=0.5,
+        options=smoothing_options,
+        index=smoothing_options.index(current_smoothing_fwhm),
         key="smoothing_fwhm_input",
     )
 
-    st.session_state.analysis["voxel_size"] = st.number_input(
+    def update_cluster_volume_for_voxel_size() -> None:
+        """Update the physical cluster volume when voxel size changes."""
+        if "cluster_size_voxels" not in st.session_state:
+            return
+
+        voxel_volume = st.session_state["voxel_size_input"] ** 3
+        st.session_state["cluster_size_mm3"] = (
+            st.session_state["cluster_size_voxels"] * voxel_volume
+        )
+
+    voxel_size_options = [1.5, 2.0]
+    current_voxel_size = st.session_state.get("analysis", {}).get(
+        "voxel_size", 2.0
+    )
+    current_voxel_size = (
+        current_voxel_size if current_voxel_size in voxel_size_options else 2.0
+    )
+
+    st.session_state.analysis["voxel_size"] = st.selectbox(
         "Voxel size of statistical analysis space (mm, isotropic)",
-        min_value=1.0,
-        max_value=10.0,
-        value=st.session_state.get("analysis", {}).get("voxel_size", 4.0),
-        step=0.5,
+        options=voxel_size_options,
+        index=voxel_size_options.index(current_voxel_size),
         key="voxel_size_input",
+        on_change=update_cluster_volume_for_voxel_size,
     )
 
     st.session_state.analysis["n_perm"] = st.number_input(
@@ -229,15 +254,21 @@ def render_analysis_param_input() -> None:
         st.markdown("Minimum cluster size for AtlasReader reporting")
 
         def voxels_to_mm3() -> None:
-            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            voxel_volume = st.session_state["voxel_size_input"] ** 3
             st.session_state["cluster_size_mm3"] = (
                 st.session_state["cluster_size_voxels"] * voxel_volume
             )
 
         def mm3_to_voxels() -> None:
-            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            voxel_volume = st.session_state["voxel_size_input"] ** 3
             st.session_state["cluster_size_voxels"] = ceil(
                 st.session_state["cluster_size_mm3"] / voxel_volume
+            )
+
+        if "cluster_size_mm3" not in st.session_state:
+            voxel_volume = st.session_state.analysis["voxel_size"] ** 3
+            st.session_state["cluster_size_mm3"] = (
+                st.session_state.get("cluster_size_voxels", 0) * voxel_volume
             )
 
         subcol1, subcol2 = st.columns(2)

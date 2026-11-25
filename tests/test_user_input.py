@@ -322,8 +322,8 @@ def test_analysis_input_saves_initial_values(analysis_st: MagicMock) -> None:
     mod.render_analysis_param_input()
 
     assert analysis_st.session_state.analysis == {
-        "smoothing_fwhm": 5.0,
-        "voxel_size": 4.0,
+        "smoothing_fwhm": 4.0,
+        "voxel_size": 2.0,
         "n_perm": 10000,
         "tfce": False,
         "handle_zero_voxels": mod.ZERO_VOXEL_OPTS[0],
@@ -346,6 +346,11 @@ def test_analysis_input_saves_changed_values(analysis_st: MagicMock) -> None:
     }
     analysis_st.number_input.side_effect = (
         lambda label, **kwargs: selected_numbers[kwargs["key"]]  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+    )
+    analysis_st.selectbox.side_effect = lambda label, options, **kwargs: (  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
+        selected_numbers[kwargs["key"]]
+        if kwargs.get("key") in selected_numbers  # pyright: ignore[reportUnknownMemberType]
+        else options[kwargs.get("index", 0)]  # pyright: ignore[reportUnknownMemberType]
     )
     analysis_st.checkbox.side_effect = (
         lambda label, **kwargs: kwargs["key"] == "tfce_input"  # pyright: ignore[reportUnknownLambdaType]  # noqa: ARG005
@@ -451,6 +456,9 @@ def test_analysis_input_atlasreader_conversions(analysis_st: MagicMock) -> None:
     }
 
     # Default voxel size is 4 mm: each voxel occupies 4³ = 64 mm³.
+    # Streamlit stores the value of keyed widgets in session state; mirror that
+    # behavior because this test invokes callbacks directly.
+    state["voxel_size_input"] = 4.0
     widget_arguments["cluster_size_voxels"]["on_change"]()
     expected_cluster_size_mm3 = 2 * 4**3
     assert state["cluster_size_mm3"] == expected_cluster_size_mm3
