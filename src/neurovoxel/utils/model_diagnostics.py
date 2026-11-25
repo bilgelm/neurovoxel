@@ -10,7 +10,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 from nibabel.nifti1 import Nifti1Image
 from nilearn import plotting  # pyright: ignore[reportMissingTypeStubs]
-from nilearn.input_data import (  # pyright: ignore[reportMissingTypeStubs]
+from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
     MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
 )
 

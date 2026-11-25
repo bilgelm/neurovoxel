@@ -7,6 +7,7 @@ from re import sub
 from typing import Any, Literal, cast, get_args
 
 import numpy as np
+from matplotlib.figure import Figure
 from nanslice import Layer
 from nanslice.jupyter import slices
 from nibabel.loadsave import (
@@ -155,6 +156,46 @@ def nanslice_overlay(  # noqa: PLR0913
         ncols=5,
         cbar=1,
         contour=contour_level,
+        title=title,
+    )
+
+
+def nanslice_stat_map(  # noqa: PLR0913
+    result: PermutedOLSResult,
+    masker: MultiNiftiMasker,
+    bg_img: Nifti1Image,
+    term: str,
+    stat: STAT_OPTIONS_LITERAL = "t",
+    cmap: str = "RdBu_r",
+    title: str = "t-statistic map",
+) -> Figure:
+    """Render a statistic map as a nanslice image."""
+    if stat not in result:
+        msg = f"{stat} is not in results"
+        raise KeyError(msg)
+
+    idx = result["tested_var_names"].index(term)
+    stat_img = unmask(
+        result[stat][idx, :],  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        masker,
+        0,
+    )
+    max_abs_value = float(np.nanmax(np.abs(stat_img.get_fdata())))
+    max_abs_value = max_abs_value if max_abs_value > 0 else 1
+
+    base_layer = Layer(bg_img, cmap="gray", label="Brain template")
+    stat_layer = Layer(
+        stat_img,
+        cmap=cmap,
+        clim=(-max_abs_value, max_abs_value),
+        mask=masker.mask_img_,
+        label=f"{stat} statistic",
+    )
+    return slices(
+        [base_layer, stat_layer],
+        nrows=5,
+        ncols=5,
+        cbar=1,
         title=title,
     )
 

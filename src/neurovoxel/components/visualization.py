@@ -3,41 +3,82 @@
 This module provides the UI components for visualizing results using Streamlit.
 """
 
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import streamlit as st
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.figure import Figure
 from pandas import Index
 
 from neurovoxel.utils.viz import (
-    basic_interactive_viz,  # pyright: ignore[reportUnknownVariableType]
+    basic_interactive_viz,
     nanslice_overlay,
+    nanslice_stat_map,
 )
 
 
-def render_visualization(inference_terms: Index) -> None:
-    """Render the visualization UI for NeuroVoxel app."""
-    for variable in inference_terms:  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
-        html_view = basic_interactive_viz(
-            st.session_state.result,
-            st.session_state.masker,
-            term=variable,
-            stat="t",
-            bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
-            opacity=0.5,  # pyright: ignore[reportArgumentType]
-            title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
-        )
-        html_content = html_view.get_iframe()  # pyright: ignore[reportUnknownMemberType]
-        st.components.v1.html(html_content, width=650, height=250)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+def render_visualization(
+    inference_terms: Index,
+    pdf_path: Path | None = None,
+) -> None:
+    """Render the visualization UI and optionally save a PDF report."""
+    if pdf_path is not None:
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-        p_thresh = 0.01
-        fig = nanslice_overlay(
-            st.session_state.result,
-            st.session_state.masker,
-            bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
-            term=variable,
-            p_var="logp_max_t",
-            p_thresh=p_thresh,
-            title=(
-                "Regression coefficient overlay with "
-                f"corrected p < {p_thresh} contours for {variable}"
-            ),
-        )
-        st.pyplot(fig, width=1300)
+    pdf = PdfPages(pdf_path) if pdf_path is not None else None
+    try:
+        for variable in inference_terms:  # pyright: ignore[reportUnknownVariableType, reportPossiblyUnboundVariable, reportUnknownMemberType, reportUnknownArgumentType]
+            html_view = basic_interactive_viz(
+                st.session_state.result,
+                st.session_state.masker,
+                term=variable,
+                stat="t",
+                bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
+                opacity=0.5,  # pyright: ignore[reportArgumentType]
+                title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+            )
+            html_content = html_view.get_iframe()  # pyright: ignore[reportUnknownMemberType]
+            st.components.v1.html(html_content, width=650, height=250)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+
+            if pdf is not None:
+                if pdf_path is None:
+                    msg = "PDF output requires a destination path."
+                    raise ValueError(msg)
+                pdf_path.parent.mkdir(parents=True, exist_ok=True)
+                static_view = nanslice_stat_map(
+                    st.session_state.result,
+                    st.session_state.masker,
+                    bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
+                    term=variable,
+                    stat="t",
+                    title=f"t-statistic map for {variable}",
+                )
+                pdf.savefig(  # pyright: ignore[reportUnknownMemberType]
+                    static_view,
+                    bbox_inches="tight",
+                )
+                plt.close(static_view)
+
+            p_thresh = 0.01
+            fig = nanslice_overlay(
+                st.session_state.result,
+                st.session_state.masker,
+                bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
+                term=variable,
+                p_var="logp_max_t",
+                p_thresh=p_thresh,
+                title=(
+                    "Regression coefficient overlay with "
+                    f"corrected p < {p_thresh} contours for {variable}"
+                ),
+            )
+            st.pyplot(fig, width=1300)
+
+            if pdf is not None:
+                pdf.savefig(fig, bbox_inches="tight")  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(fig, Figure):  # pyright: ignore[reportUnnecessaryIsInstance]
+                plt.close(fig)
+    finally:
+        if pdf is not None:
+            pdf.close()
