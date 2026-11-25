@@ -13,8 +13,8 @@ from pandas import Index
 
 from neurovoxel.utils.viz import (
     basic_interactive_viz,
-    basic_viz,
     nanslice_overlay,
+    nanslice_stat_map,
 )
 
 
@@ -46,20 +46,19 @@ def render_visualization(
                     msg = "PDF output requires a destination path."
                     raise ValueError(msg)
                 pdf_path.parent.mkdir(parents=True, exist_ok=True)
-                static_view = basic_viz(
+                static_view = nanslice_stat_map(
                     st.session_state.result,
                     st.session_state.masker,
+                    bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
                     term=variable,
                     stat="t",
-                    bg_img=st.session_state.get("paths", {}).get("template"),  # pyright: ignore[reportArgumentType]
-                    display_mode="ortho",  # pyright: ignore[reportArgumentType]
-                    title=f"t-stat for {variable}",  # pyright: ignore[reportArgumentType]
+                    title=f"t-statistic map for {variable}",
                 )
                 pdf.savefig(  # pyright: ignore[reportUnknownMemberType]
-                    static_view.frame_axes.figure,  # pyright: ignore[reportUnknownMemberType]
+                    static_view,
                     bbox_inches="tight",
                 )
-                static_view.close()
+                plt.close(static_view)
 
             p_thresh = 0.01
             fig = nanslice_overlay(
