@@ -33,6 +33,7 @@ from neurovoxel.utils.load_parse import (
 )
 from neurovoxel.utils.model_diagnostics import (
     generate_ols_results_pdf,
+    save_ols_diagnostic_maps,
 )
 from neurovoxel.utils.output import (
     parameter_output,
@@ -224,6 +225,15 @@ def main(
                         Path(st.session_state.paths["outputdir"])
                         / "ols_results.pdf"
                     ),
+                )
+                diagnostic_output_dir = (
+                    Path(st.session_state.paths["outputdir"])
+                    / "model_diagnostics_maps"
+                )
+                save_ols_diagnostic_maps(
+                    stat_values=stat_values,
+                    masker=st.session_state.masker,
+                    output_dir=diagnostic_output_dir,
                 )
 
     render_footer()

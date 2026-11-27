@@ -335,6 +335,7 @@ def app_mocks(
         "_save_analysis_results",
         "render_footer",
         "generate_ols_results_pdf",
+        "save_ols_diagnostic_maps",
     )
     helpers: dict[str, Mock] = {name: Mock() for name in helper_names}
 
@@ -433,17 +434,35 @@ def test_main_success(
     )
     helpers["render_footer"].assert_called_once_with()
 
-    expected_buttons: list[object] = []
-    if not autoload:
-        expected_buttons.append(call("Load BIDS dataset", disabled=False))
-    expected_buttons.append(call("Run analysis", disabled=False))
-    assert mocked_st.button.call_args_list == expected_buttons
+    helpers["generate_ols_results_pdf"].assert_called_once()
+    pdf_call = helpers["generate_ols_results_pdf"].call_args
+    pdf_kwargs = pdf_call.kwargs
+    assert set(pdf_kwargs["stat_values"]) == {"r_square", "f_stat", "f_pvalues"}
+    np.testing.assert_array_equal(
+        pdf_kwargs["stat_values"]["r_square"]["array"],
+        [0.25, 0.75],
+    )
+    np.testing.assert_array_equal(
+        pdf_kwargs["stat_values"]["f_stat"]["array"],
+        [2.0, 3.0],
+    )
+    np.testing.assert_array_equal(
+        pdf_kwargs["stat_values"]["f_pvalues"]["array"],
+        [0.1, 0.05],
+    )
+    assert pdf_kwargs["masker"] is mocked_st.session_state.masker
+    assert pdf_kwargs["output_path"] == tmp_path / "ols_results.pdf"
 
-    if debug:
-        mocked_st.write.assert_called_once_with(mocked_st.session_state)
-        mocked_st.expander.assert_any_call("Session State")
-    else:
-        mocked_st.write.assert_not_called()
+    helpers["save_ols_diagnostic_maps"].assert_called_once()
+    nifti_call = helpers["save_ols_diagnostic_maps"].call_args
+    nifti_kwargs = nifti_call.kwargs
+    assert set(nifti_kwargs["stat_values"]) == {
+        "r_square",
+        "f_stat",
+        "f_pvalues",
+    }
+    assert nifti_kwargs["masker"] is mocked_st.session_state.masker
+    assert nifti_kwargs["output_dir"] == tmp_path / "model_diagnostics_maps"
 
 
 @pytest.mark.parametrize(

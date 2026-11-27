@@ -8,9 +8,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
+from nibabel.loadsave import (
+    save as nib_save,  # pyright: ignore[reportUnknownVariableType]
+)
 from nibabel.nifti1 import Nifti1Image
 from nilearn import plotting  # pyright: ignore[reportMissingTypeStubs]
-from nilearn.input_data import (  # pyright: ignore[reportMissingTypeStubs]
+from nilearn.maskers import (  # pyright: ignore[reportMissingTypeStubs]
     MultiNiftiMasker,  # pyright: ignore[reportMissingTypeStubs]
 )
 
@@ -75,3 +78,22 @@ def generate_ols_results_pdf(
 
             output_pdf.savefig(figure=fig, bbox_inches="tight")  # pyright: ignore[reportUnknownMemberType]
             plt.close(fig)
+
+
+def save_ols_diagnostic_maps(
+    stat_values: dict[str, StatValues],
+    masker: MultiNiftiMasker,
+    output_dir: Path,
+) -> list[str]:
+    """Save voxel-wise model diagnostic maps as NIfTI files."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filenames: list[str] = []
+
+    for key, value_dict in stat_values.items():
+        values = value_dict["array"]
+        image = unmask(values, masker, np.float64(-1))
+        filename = output_dir / f"diagnostic_{key}.nii.gz"
+        nib_save(image, filename)
+        filenames.append(filename.name)
+
+    return filenames
